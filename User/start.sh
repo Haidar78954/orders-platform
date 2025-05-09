@@ -1,1 +1,1 @@
-python user.py
+python main.py
