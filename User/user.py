@@ -242,7 +242,10 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         message = None
         args = []
 
-    # ✅ حماية من إجراءات جارية
+    # ✅ تفريغ كل بيانات المستخدم عند كل /start
+    context.user_data.clear()
+
+    # ✅ حماية من إجراءات جارية (بقيت للاحتياط)
     if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
         if message:
             await message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمّه أو ألغِه قبل فتح عروض جديدة.")
@@ -255,7 +258,7 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         return ConversationHandler.END
     context.user_data["last_ad_click_time"] = now
 
-    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر حقيقي
+    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر صالح
     if args and args[0]:
         if args[0].startswith("go_"):
             if message:
@@ -272,9 +275,7 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         elif args[0].startswith("vip_"):
             return await handle_vip_start(update, context)
 
-        else:
-            # 🟢 تجاهل أي باراميتر غير معروف واعتبره دخول عادي
-            args = []
+        # ✅ تجاهل أي شيء آخر كأنه دخول عادي
 
     # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
