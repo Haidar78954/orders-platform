@@ -232,68 +232,27 @@ def get_main_menu():
 from urllib.parse import unquote
 
 
-async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
-    if update:
-        user_id = update.effective_user.id
-        message = update.message
-        args = context.args if hasattr(context, "args") else []
-    else:
-        message = None
-        args = []
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    message = update.message
 
-    # ✅ تفريغ بيانات المستخدم عند كل /start
+    # تفريغ السياق القديم
     context.user_data.clear()
-    print("🚀 دالة start تعمل من النسخة الجديدة!")
+    print("🚀 دخل المستخدم بشكل عادي إلى /start")
 
-    # ✅ حماية من إجراءات جارية
-    if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
-        if message:
-            await message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمّه أو ألغِه قبل فتح عروض جديدة.")
-        return ConversationHandler.END
-
-    # ✅ حماية من الضغط المتكرر
-    now = datetime.now()
-    last_click = context.user_data.get("last_ad_click_time")
-    if last_click and (now - last_click).total_seconds() < 2:
-        return ConversationHandler.END
-    context.user_data["last_ad_click_time"] = now
-
-    # ✅ فقط إذا دخل من go_ أو vip_ نتعامل كإعلان
-    if args:
-        first_arg = args[0].strip()
-        if first_arg.startswith("go_"):
-            if message:
-                await message.reply_text(
-                    "📢 *يالله عالسرييع 🔥*\n\n"
-                    "وصلت من إعلان، لتكمل:\n"
-                    "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
-                    "➤ ثم اختر المطعم اللي شفته\n\n"
-                    "👇 وبلّش شوف العروض 👇",
-                    parse_mode="Markdown"
-                )
-            return ConversationHandler.END
-        elif first_arg.startswith("vip_"):
-            return await handle_vip_start(update, context)
-        # ✅ تجاهل باقي القيم دون إظهار رسالة خطأ
-
-    # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
         ["تفاصيل عن الأسئلة وما الغاية منها"],
         ["املأ بياناتي"]
     ], resize_keyboard=True)
 
-    welcome_msg = (
+    await message.reply_text(
         "أهلاً وسهلاً 🌹\n"
         "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-        "غايتنا نخدمك بأفضل طريقة 👌"
+        "غايتنا نخدمك بأفضل طريقة 👌",
+        reply_markup=reply_markup
     )
-
-    if message:
-        await message.reply_text(welcome_msg, reply_markup=reply_markup)
-    else:
-        await context.bot.send_message(chat_id=user_id, text=welcome_msg, reply_markup=reply_markup)
-
     return ASK_INFO
+
 
 
 
@@ -3598,6 +3557,70 @@ def reset_order_counters():
     db_conn.commit()
     print("✅ تم تصفير عدادات الطلبات لجميع المطاعم.")
 
+async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = update.effective_user.id
+    message = update.message
+
+    if not message.text.startswith("/start "):
+        return ConversationHandler.END
+
+    arg = message.text.split("/start ", 1)[1].strip()
+
+    # ✅ حماية من الضغط المتكرر
+    now = datetime.now()
+    last_click = context.user_data.get("last_ad_click_time")
+    if last_click and (now - last_click).total_seconds() < 2:
+        return ConversationHandler.END
+    context.user_data["last_ad_click_time"] = now
+
+    # ✅ إعلان عادي
+    if arg.startswith("go_"):
+        await message.reply_text(
+            "📢 *يالله عالسرييع 🔥*\n\n"
+            "وصلت من إعلان، لتكمل:\n"
+            "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
+            "➤ ثم اختر المطعم اللي شفته\n\n"
+            "👇 وبلّش شوف العروض 👇",
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
+    # ✅ إعلان VIP
+    elif arg.startswith("vip_"):
+        try:
+            _, city_id_str, restaurant_id_str = arg.split("_")
+            city_id = int(city_id_str)
+
+            # ✅ جلب المدينة الحالية للمستخدم من قاعدة البيانات
+            async with aiosqlite.connect("database.db") as db:
+                async with db.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+
+            if not row:
+                await message.reply_text("❌ لم نجد بياناتك. يرجى التسجيل أولاً.")
+                return ConversationHandler.END
+
+            user_city_name = row[0]
+
+            # ✅ التحقق من معرف المدينة
+            async with aiosqlite.connect("database.db") as db:
+                async with db.execute("SELECT id FROM cities WHERE name = ?", (user_city_name,)) as cursor:
+                    city_row = await cursor.fetchone()
+
+            if not city_row or city_row[0] != city_id:
+                await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
+                return ConversationHandler.END
+
+            # ✅ السماح بإكمال الإعلان
+            return await handle_vip_start(update, context)
+
+        except Exception as e:
+            print(f"❌ خطأ في تحليل باراميتر الإعلان: {e}")
+            await message.reply_text("❌ الرابط غير صالح.")
+            return ConversationHandler.END
+
+    # 🔕 غير إعلان صالح
+    return ConversationHandler.END
 
 
 
@@ -3726,7 +3749,8 @@ async def run_user_bot():
     application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
     # ✅ يجب أن يكون أول هاندلر
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", handle_ad_start))
+
 
     # باقي الهاندلرات
     application.add_handler(conv_handler)
