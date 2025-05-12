@@ -231,12 +231,13 @@ def get_main_menu():
 # الوظائف
 from urllib.parse import unquote
 
+
 async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
     if update:
         user_id = update.effective_user.id
         message = update.message
         args = context.args if hasattr(context, "args") else []
-        args = [arg.strip() for arg in args if arg.strip()]  # إزالة القيم الفارغة والمسافات
+        args = [arg.strip() for arg in args if arg.strip()]
     else:
         message = None
         args = []
@@ -254,8 +255,8 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         return ConversationHandler.END
     context.user_data["last_ad_click_time"] = now
 
-    # ✅ التعامل مع الإعلانات فقط إذا كان param صالح ومضمون
-    if args and args[0]:  # ← هذا هو التعديل الحاسم
+    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر حقيقي
+    if args and args[0]:
         if args[0].startswith("go_"):
             if message:
                 await message.reply_text(
@@ -272,9 +273,8 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
             return await handle_vip_start(update, context)
 
         else:
-            if message:
-                await message.reply_text("❌ رابط الإعلان غير صالح.")
-            return ConversationHandler.END
+            # 🟢 تجاهل أي باراميتر غير معروف واعتبره دخول عادي
+            args = []
 
     # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
@@ -294,7 +294,6 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         await context.bot.send_message(chat_id=user_id, text=welcome_msg, reply_markup=reply_markup)
 
     return ASK_INFO
-
 
 
 async def ask_info_details(update: Update, context: CallbackContext) -> int:
