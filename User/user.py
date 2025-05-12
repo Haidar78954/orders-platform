@@ -347,23 +347,28 @@ async def send_verification_code(update: Update, context: CallbackContext) -> in
         )
         return ASK_PHONE
 
-    # التحقق من أن الرقم غير محظور
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT phone FROM blacklisted_numbers WHERE phone = ?", (phone,))
-    if cursor.fetchone():
-        await update.message.reply_text(
-            "❌ عذراً، رقمك محظور من قبل إدارة البوت بسبب سلوك سابق.\n"
-            "يرجى التواصل مع الدعم للمزيد من التفاصيل:\n"
-            "📞 0912345678 - 0998765432"
-        )
-        return ASK_PHONE  # إعادة المستخدم لإدخال رقم جديد
+    try:
+        # التحقق من أن الرقم غير محظور باستخدام aiosqlite
+        async with aiosqlite.connect("database.db") as db:
+            async with db.execute("SELECT phone FROM blacklisted_numbers WHERE phone = ?", (phone,)) as cursor:
+                if await cursor.fetchone():
+                    await update.message.reply_text(
+                        "❌ عذراً، رقمك محظور من قبل إدارة البوت بسبب سلوك سابق.\n"
+                        "يرجى التواصل مع الدعم للمزيد من التفاصيل:\n"
+                        "📞 0912345678 - 0998765432"
+                    )
+                    return ASK_PHONE  # إعادة المستخدم لإدخال رقم جديد
+
+    except Exception as e:
+        logger.error(f"Database error in send_verification_code: {e}")
+        await update.message.reply_text("❌ حدث خطأ في التحقق من قاعدة البيانات.")
+        return ASK_PHONE
 
     # إنشاء كود التحقق
-    verification_code = random.randint(10000, 99999)  # إنشاء كود عشوائي من 5 أرقام
+    verification_code = random.randint(10000, 99999)
     context.user_data['phone'] = phone
     context.user_data['verification_code'] = verification_code
 
-    # إرسال الكود والبيانات إلى قناة التحقق الخاصة
     try:
         name = context.user_data['name']
         verification_message = (
@@ -373,13 +378,12 @@ async def send_verification_code(update: Update, context: CallbackContext) -> in
             f"مستعدون لخدمتكم عالسريع 🔥"
         )
 
-        # إرسال الرسالة إلى القناة المخصصة
+        # إرسال الكود إلى القناة (يمكنك لاحقًا تعديله لإرساله للمستخدم فقط)
         await context.bot.send_message(
-            chat_id="@verifycode12345",  # معرف القناة التي سيتم إرسال الرسالة إليها
+            chat_id="@verifycode12345",
             text=verification_message
         )
 
-        # طلب إدخال الكود من المستخدم
         reply_markup = ReplyKeyboardMarkup([
             ["عودة ⬅️"]
         ], resize_keyboard=True)
@@ -389,8 +393,9 @@ async def send_verification_code(update: Update, context: CallbackContext) -> in
             reply_markup=reply_markup
         )
         return ASK_PHONE_VERIFICATION
+
     except Exception as e:
-        # في حال حدوث خطأ في إرسال الرسالة
+        logger.error(f"Error sending verification code: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء إرسال الكود. يرجى المحاولة مرة أخرى.")
         context.user_data.pop('phone', None)
         return await ask_phone(update, context)
@@ -446,8 +451,6 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
         return ASK_PHONE_VERIFICATION
 
 
-
-
 async def handle_province(update: Update, context: CallbackContext) -> int:
     province = update.message.text
 
@@ -455,31 +458,35 @@ async def handle_province(update: Update, context: CallbackContext) -> int:
         context.user_data.pop('phone', None)
         return await ask_phone(update, context)
 
-    # حفظ اسم المحافظة
     context.user_data['province'] = province
 
-    # سحب المدن المرتبطة بالمحافظة من قاعدة البيانات
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT id FROM provinces WHERE name = ?", (province,))
-    result = cursor.fetchone()
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            # جلب معرف المحافظة
+            async with db.execute("SELECT id FROM provinces WHERE name = ?", (province,)) as cursor:
+                result = await cursor.fetchone()
 
-    if not result:
-        await update.message.reply_text("⚠️ حدث خطأ أثناء جلب المدن. حاول مرة أخرى.")
+            if not result:
+                await update.message.reply_text("⚠️ حدث خطأ أثناء جلب المدن. حاول مرة أخرى.")
+                return ASK_PROVINCE
+
+            province_id = result[0]
+
+            # جلب المدن المرتبطة بالمحافظة
+            async with db.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,)) as cursor:
+                rows = await cursor.fetchall()
+
+        cities = [row[0] for row in rows]
+        cities += ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
+
+        reply_markup = ReplyKeyboardMarkup([[city] for city in cities], resize_keyboard=True)
+        await update.message.reply_text("يرجى اختيار المدينة:", reply_markup=reply_markup)
+        return ASK_CITY
+
+    except Exception as e:
+        logger.error(f"Database error in handle_province: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء معالجة البيانات. حاول لاحقًا.")
         return ASK_PROVINCE
-
-    province_id = result[0]
-
-    # استخراج المدن المرتبطة
-    cursor.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,))
-    cities = [row[0] for row in cursor.fetchall()]
-
-    # إضافة خيارات إضافية
-    cities += ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
-
-    reply_markup = ReplyKeyboardMarkup([[city] for city in cities], resize_keyboard=True)
-    await update.message.reply_text("يرجى اختيار المدينة:", reply_markup=reply_markup)
-
-    return ASK_CITY
 
 
 
@@ -489,17 +496,27 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
     if city == "عودة ➡️":
         context.user_data.pop('province', None)
 
-        # جلب المحافظات من قاعدة البيانات
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT name FROM provinces")
-        provinces = [row[0] for row in cursor.fetchall()]
+        try:
+            async with aiosqlite.connect("database.db") as db:
+                async with db.execute("SELECT name FROM provinces") as cursor:
+                    rows = await cursor.fetchall()
 
-        reply_markup = ReplyKeyboardMarkup(
-            [[p for p in provinces[i:i+3]] for i in range(0, len(provinces), 3)],
-            resize_keyboard=True
-        )
-        await update.message.reply_text("🔙 تم الرجوع إلى السؤال السابق. يرجى اختيار المحافظة مجددًا:", reply_markup=reply_markup)
-        return ASK_PROVINCE
+            provinces = [row[0] for row in rows]
+
+            reply_markup = ReplyKeyboardMarkup(
+                [[p for p in provinces[i:i+3]] for i in range(0, len(provinces), 3)],
+                resize_keyboard=True
+            )
+            await update.message.reply_text(
+                "🔙 تم الرجوع إلى السؤال السابق. يرجى اختيار المحافظة مجددًا:",
+                reply_markup=reply_markup
+            )
+            return ASK_PROVINCE
+
+        except Exception as e:
+            logger.error(f"Database error in handle_city back: {e}")
+            await update.message.reply_text("❌ حدث خطأ أثناء تحميل المحافظات. حاول مجددًا.")
+            return ASK_PROVINCE
 
     elif city == "لم تذكر مدينتي ؟ 😕":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
@@ -528,37 +545,41 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
 
 async def handle_custom_city(update: Update, context: CallbackContext) -> int:
     city_name = update.message.text
+    province = context.user_data.get('province', '')
 
     if city_name == "عودة ➡️":
-        # ✅ العودة إلى اختيار المدينة (جلب المدن من قاعدة البيانات)
-        province = context.user_data.get('province', '')
-        cursor = db_conn.cursor()
+        try:
+            async with aiosqlite.connect("database.db") as db:
+                # جلب معرف المحافظة
+                async with db.execute("SELECT id FROM provinces WHERE name = ?", (province,)) as cursor:
+                    result = await cursor.fetchone()
+                if not result:
+                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                    return ASK_PROVINCE
 
-        # جلب معرف المحافظة
-        cursor.execute("SELECT id FROM provinces WHERE name = ?", (province,))
-        result = cursor.fetchone()
-        if not result:
-            await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
-            return ASK_PROVINCE
+                province_id = result[0]
 
-        province_id = result[0]
+                # جلب المدن من قاعدة البيانات
+                async with db.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,)) as cursor:
+                    rows = await cursor.fetchall()
 
-        # جلب المدن من قاعدة البيانات
-        cursor.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,))
-        cities = [row[0] for row in cursor.fetchall()]
+            cities = [row[0] for row in rows]
+            city_options = cities + ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
 
-        # إضافة الخيارات الإضافية
-        city_options = cities + ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
-        reply_markup = ReplyKeyboardMarkup(
-            [[city] for city in city_options],
-            resize_keyboard=True
-        )
-        await update.message.reply_text("🔙 اختر المدينة التي تريدها:", reply_markup=reply_markup)
-        return ASK_CITY
+            reply_markup = ReplyKeyboardMarkup(
+                [[city] for city in city_options],
+                resize_keyboard=True
+            )
+            await update.message.reply_text("🔙 اختر المدينة التي تريدها:", reply_markup=reply_markup)
+            return ASK_CITY
+
+        except Exception as e:
+            logger.error(f"Database error in handle_custom_city (عودة): {e}")
+            await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقًا.")
+            return ASK_CITY
 
     # ✅ إرسال المدينة المقترحة إلى قناة الدعم
-    province = context.user_data.get('province', 'غير متوفر')
-    custom_city_channel = "@Lamtozkar"  # ← غيّره إن أردت
+    custom_city_channel = "@Lamtozkar"  # ← يمكنك تغييره
 
     await context.bot.send_message(
         chat_id=custom_city_channel,
@@ -570,26 +591,34 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
 
     await update.message.reply_text(
         "✅ تم استلام مدينتك! نأمل أن نتمكن من خدمتك قريبًا 🙏.\n"
-        "يرجى اختيار المدينة من القائمة:",
+        "يرجى اختيار المدينة من القائمة:"
     )
 
     # ✅ إعادة المستخدم لاختيار المدينة من قاعدة البيانات
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT id FROM provinces WHERE name = ?", (province,))
-    result = cursor.fetchone()
-    if not result:
-        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
-        return ASK_PROVINCE
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            async with db.execute("SELECT id FROM provinces WHERE name = ?", (province,)) as cursor:
+                result = await cursor.fetchone()
+            if not result:
+                await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                return ASK_PROVINCE
 
-    province_id = result[0]
-    cursor.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,))
-    cities = [row[0] for row in cursor.fetchall()]
-    city_options = cities + ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
+            province_id = result[0]
 
-    reply_markup = ReplyKeyboardMarkup([[city] for city in city_options], resize_keyboard=True)
-    await update.message.reply_text("🔙 اختر المدينة التي تريدها:", reply_markup=reply_markup)
-    return ASK_CITY
+            async with db.execute("SELECT name FROM cities WHERE province_id = ?", (province_id,)) as cursor:
+                rows = await cursor.fetchall()
 
+        cities = [row[0] for row in rows]
+        city_options = cities + ["لم تذكر مدينتي ؟ 😕", "عودة ➡️"]
+
+        reply_markup = ReplyKeyboardMarkup([[city] for city in city_options], resize_keyboard=True)
+        await update.message.reply_text("🔙 اختر المدينة التي تريدها:", reply_markup=reply_markup)
+        return ASK_CITY
+
+    except Exception as e:
+        logger.error(f"Database error in handle_custom_city (إعادة): {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقًا.")
+        return ASK_CITY
 
 
 async def ask_location(update: Update, context: CallbackContext) -> int:
@@ -779,12 +808,12 @@ async def confirm_info(update: Update, context: CallbackContext) -> int:
 
 
 
+
 async def handle_confirmation(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
 
     if choice == "نعم متأكد ✅":
         try:
-            # استرجاع بيانات المستخدم
             user_id = update.effective_user.id
             name = context.user_data['name']
             phone = context.user_data['phone']
@@ -795,21 +824,21 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
             latitude = location_coords.get('latitude')
             longitude = location_coords.get('longitude')
 
-            # حفظ البيانات في قاعدة البيانات
-            cursor = db_conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO user_data 
-                (user_id, name, phone, province, city, location_text, latitude, longitude) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, name, phone, province, city, location_text, latitude, longitude))
-            db_conn.commit()
+            async with aiosqlite.connect("database.db") as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO user_data 
+                    (user_id, name, phone, province, city, location_text, latitude, longitude) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, name, phone, province, city, location_text, latitude, longitude))
 
-            # ✅ محاولة الحصول على معرف قناة الإعلانات للمدينة
-            cursor.execute("SELECT ads_channel FROM cities WHERE name = ?", (city,))
-            result = cursor.fetchone()
-            ads_channel = result[0] if result and result[0] else None
+                # الحصول على قناة الإعلانات
+                async with db.execute("SELECT ads_channel FROM cities WHERE name = ?", (city,)) as cursor:
+                    result = await cursor.fetchone()
+                    ads_channel = result[0] if result and result[0] else None
 
-            # بناء الكيبورد الأساسي
+                await db.commit()
+
+            # عرض الرد الأساسي
             reply_markup = ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
                 ["تعديل معلوماتي 🖊", "التواصل مع الدعم 🎧"],
@@ -822,7 +851,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
                 reply_markup=reply_markup
             )
 
-            # ✅ إذا كان هناك قناة إعلانات، أرسل دعوة للمستخدم
+            # دعوة للانضمام إلى قناة المدينة إن وُجدت
             if ads_channel:
                 invite_keyboard = InlineKeyboardMarkup([[
                     InlineKeyboardButton("📢 لا تفوّت العروض! انضم لقناتنا", url=f"https://t.me/{ads_channel.lstrip('@')}")
@@ -849,6 +878,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_INFO
+
 
 
 
