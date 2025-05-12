@@ -235,7 +235,8 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
     if update:
         user_id = update.effective_user.id
         message = update.message
-        args = [arg for arg in context.args if arg.strip()] if hasattr(context, "args") else []
+        args = context.args if hasattr(context, "args") else []
+        args = [arg.strip() for arg in args if arg.strip()]  # إزالة القيم الفارغة والمسافات
     else:
         message = None
         args = []
@@ -253,8 +254,8 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         return ConversationHandler.END
     context.user_data["last_ad_click_time"] = now
 
-    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر حقيقي
-    if args:
+    # ✅ التعامل مع الإعلانات فقط إذا كان param صالح ومضمون
+    if args and args[0]:  # ← هذا هو التعديل الحاسم
         if args[0].startswith("go_"):
             if message:
                 await message.reply_text(
@@ -293,6 +294,7 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         await context.bot.send_message(chat_id=user_id, text=welcome_msg, reply_markup=reply_markup)
 
     return ASK_INFO
+
 
 
 async def ask_info_details(update: Update, context: CallbackContext) -> int:
