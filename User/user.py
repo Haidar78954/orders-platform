@@ -1107,74 +1107,77 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
         await update.message.reply_text("❌ المطعم الذي اخترته غير موجود. يرجى اختيار مطعم آخر.")
         return SELECT_RESTAURANT
 
-    # ✅ التحقق من إذا كان المطعم مجمد
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT is_frozen FROM restaurants WHERE name = ?", (restaurant_name,))
-    result = cursor.fetchone()
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            # التحقق من حالة التجميد
+            async with db.execute("SELECT is_frozen FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
+                result = await cursor.fetchone()
 
-    if not result:
-        await update.message.reply_text("❌ حدث خطأ في جلب حالة المطعم. يرجى المحاولة لاحقًا.")
+            if not result:
+                await update.message.reply_text("❌ حدث خطأ في جلب حالة المطعم. يرجى المحاولة لاحقًا.")
+                return SELECT_RESTAURANT
+
+            is_frozen = result[0]
+            if is_frozen:
+                await update.message.reply_text(
+                    f"❌ عذرًا، المطعم {restaurant_name} خارج الخدمة حاليًا بسبب التوقف المؤقت.\n"
+                    "🔄 يرجى اختيار مطعم آخر."
+                )
+                return SELECT_RESTAURANT
+
+            # التحقق من أوقات العمل
+            is_open = await check_restaurant_availability(restaurant_name)
+            if not is_open:
+                async with db.execute("SELECT open_hour, close_hour FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
+                    result = await cursor.fetchone()
+
+                if result:
+                    open_hour, close_hour = result
+
+                    def format_hour_12(hour_float):
+                        import math
+                        hour = int(hour_float)
+                        minutes = int(round((hour_float - hour) * 60))
+                        suffix = "صباحًا" if hour < 12 else "مساءً" if hour >= 18 else "ظهرًا"
+                        hour_12 = hour % 12
+                        hour_12 = 12 if hour_12 == 0 else hour_12
+                        time_str = f"{hour_12}:{minutes:02d}" if minutes else f"{hour_12}"
+                        return f"{time_str} {suffix}"
+
+                    open_str = format_hour_12(open_hour)
+                    close_str = format_hour_12(close_hour)
+
+                    await update.message.reply_text(
+                        f"❌ منعتذر، {restaurant_name} مسكر حاليًا.\n"
+                        f"⏰ أوقات الدوام: من {open_str} إلى {close_str}\n"
+                        "🔙 اختر مطعماً آخر أو حاول مرة أخرى لاحقاً."
+                    )
+                else:
+                    await update.message.reply_text("❌ لا يمكن جلب أوقات عمل المطعم حالياً.")
+                return SELECT_RESTAURANT
+
+            # ✅ عرض الفئات
+            context.user_data['selected_restaurant'] = restaurant_name
+
+            async with db.execute("""
+                SELECT c.name FROM categories c
+                JOIN restaurants r ON c.restaurant_id = r.id
+                WHERE r.name = ?
+                ORDER BY c.name
+            """, (restaurant_name,)) as cursor:
+                rows = await cursor.fetchall()
+
+            categories = [row[0] for row in rows]
+            categories.append("القائمة الرئيسية 🪧")
+
+            reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
+            await update.message.reply_text("🔽 اختر الفئة التي تريد الطلب منها:", reply_markup=reply_markup)
+            return ORDER_CATEGORY
+
+    except Exception as e:
+        logger.error(f"Database error in handle_restaurant_selection: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطعم. يرجى المحاولة لاحقًا.")
         return SELECT_RESTAURANT
-
-    is_frozen = result[0]
-    if is_frozen:
-        await update.message.reply_text(
-            f"❌ عذرًا، المطعم {restaurant_name} خارج الخدمة حاليًا بسبب التوقف المؤقت.\n"
-            "🔄 يرجى اختيار مطعم آخر."
-        )
-        return SELECT_RESTAURANT
-
-    # ✅ التحقق من وقت العمل
-    is_open = await check_restaurant_availability(restaurant_name)
-    if not is_open:
-        # جلب وقت العمل
-        cursor.execute("SELECT open_hour, close_hour FROM restaurants WHERE name = ?", (restaurant_name,))
-        result = cursor.fetchone()
-
-        if result:
-            open_hour, close_hour = result
-
-            def format_hour_12(hour_float):
-                import math
-                hour = int(hour_float)
-                minutes = int(round((hour_float - hour) * 60))
-                suffix = "صباحًا" if hour < 12 else "مساءً" if hour >= 18 else "ظهرًا"
-                hour_12 = hour % 12
-                hour_12 = 12 if hour_12 == 0 else hour_12
-                time_str = f"{hour_12}:{minutes:02d}" if minutes else f"{hour_12}"
-                return f"{time_str} {suffix}"
-
-            open_str = format_hour_12(open_hour)
-            close_str = format_hour_12(close_hour)
-
-            await update.message.reply_text(
-                f"❌ منعتذر، {restaurant_name} مسكر حاليًا.\n"
-                f"⏰ أوقات الدوام: من {open_str} إلى {close_str}\n"
-                "🔙 اختر مطعماً آخر أو حاول مرة أخرى لاحقاً."
-            )
-        else:
-            await update.message.reply_text("❌ لا يمكن جلب أوقات عمل المطعم حالياً.")
-        return SELECT_RESTAURANT
-
-    # ✅ إذا كل شيء تمام، انتقل لعرض الفئات
-    context.user_data['selected_restaurant'] = restaurant_name
-
-    cursor.execute("""
-        SELECT c.name FROM categories c
-        JOIN restaurants r ON c.restaurant_id = r.id
-        WHERE r.name = ?
-        ORDER BY c.name
-    """, (restaurant_name,))
-    categories = [row[0] for row in cursor.fetchall()]
-    categories.append("القائمة الرئيسية 🪧")
-
-    reply_markup = ReplyKeyboardMarkup([[category] for category in categories], resize_keyboard=True)
-    await update.message.reply_text(
-        "🔽 اختر الفئة التي تريد الطلب منها:",
-        reply_markup=reply_markup
-    )
-    return ORDER_CATEGORY
-
 
 
 
@@ -1186,9 +1189,12 @@ async def check_restaurant_availability(restaurant_name: str) -> bool:
         damascus_time = datetime.now(pytz.timezone("Asia/Damascus"))
         now_hour = damascus_time.hour + damascus_time.minute / 60
 
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT open_hour, close_hour, is_frozen FROM restaurants WHERE name = ?", (restaurant_name,))
-        result = cursor.fetchone()
+        async with aiosqlite.connect("database.db") as db:
+            async with db.execute(
+                "SELECT open_hour, close_hour, is_frozen FROM restaurants WHERE name = ?",
+                (restaurant_name,)
+            ) as cursor:
+                result = await cursor.fetchone()
 
         if not result:
             logger.warning(f"⚠️ لم يتم العثور على المطعم: {restaurant_name}")
@@ -1209,7 +1215,6 @@ async def check_restaurant_availability(restaurant_name: str) -> bool:
         return False
 
 
-
 async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAULT_TYPE, from_ad=False):
     restaurant_id = context.user_data.get("selected_restaurant_id")
 
@@ -1217,76 +1222,82 @@ async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text("❌ لم يتم تحديد المطعم.")
         return
 
-    # جلب اسم المطعم والفئات من قاعدة البيانات
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            # جلب اسم المطعم
+            async with db.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,)) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await update.message.reply_text("❌ لم يتم العثور على المطعم.")
+                return
 
-    cursor.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        await update.message.reply_text("❌ لم يتم العثور على المطعم.")
-        return
+            restaurant_name = row[0]
+            context.user_data["current_cart_restaurant"] = restaurant_name
 
-    restaurant_name = row[0]
-    context.user_data["current_cart_restaurant"] = restaurant_name
+            # جلب الفئات
+            async with db.execute("""
+                SELECT name FROM categories
+                WHERE restaurant_id = ?
+                ORDER BY name
+            """, (restaurant_id,)) as cursor:
+                rows = await cursor.fetchall()
 
-    cursor.execute("""
-        SELECT name FROM categories
-        WHERE restaurant_id = ?
-        ORDER BY name
-    """, (restaurant_id,))
-    rows = cursor.fetchall()
-    conn.close()
+        if not rows:
+            await update.message.reply_text("❌ لا توجد فئات مسجلة لهذا المطعم حالياً.")
+            return
 
-    if not rows:
-        await update.message.reply_text("❌ لا توجد فئات مسجلة لهذا المطعم حالياً.")
-        return
+        keyboard = [[KeyboardButton(name[0])] for name in rows]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    keyboard = [[KeyboardButton(name[0])] for name in rows]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        if from_ad:
+            await update.message.reply_text(
+                f"✨ عروض من {restaurant_name} وصلت حديثًا!\n"
+                f"👇 اختر الفئة وشوف العروض عالسريع!",
+                reply_markup=reply_markup
+            )
+        else:
+            await update.message.reply_text(
+                f"📋 اختر الفئة من مطعم {restaurant_name}:",
+                reply_markup=reply_markup
+            )
 
-    if from_ad:
-        await update.message.reply_text(
-            f"✨ عروض من {restaurant_name} وصلت حديثًا!\n"
-            f"👇 اختر الفئة وشوف العروض عالسريع!",
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_text(
-            f"📋 اختر الفئة من مطعم {restaurant_name}:",
-            reply_markup=reply_markup
-        )
+    except Exception as e:
+        logger.error(f"❌ Database error in show_restaurant_categories: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء جلب الفئات. حاول مرة أخرى لاحقاً.")
+        
 
 
+async def has_active_order(user_id: int) -> bool:
+    """
+    التحقق من وجود طلب نشط للمستخدم.
+    يشمل الحالات:
+    - قيد التوصيل
+    - بانتظار الكاشير
+    - جاري المعالجة
+    - pending
+    - in_progress
+    """
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            async with db.execute("""
+                SELECT status FROM orders 
+                WHERE user_id = ? 
+                ORDER BY id DESC 
+                LIMIT 1
+            """, (user_id,)) as cursor:
+                row = await cursor.fetchone()
 
-def has_active_order(user_id: int) -> bool:
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT status FROM orders WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
+        if not row:
+            return False
 
-    if not row:
+        return row[0] in [
+            "قيد التوصيل", "بانتظار الكاشير", "جاري المعالجة",
+            "pending", "in_progress"
+        ]
+
+    except Exception as e:
+        logger.error(f"❌ Error checking active order for user {user_id}: {e}")
         return False
-
-    return row[0] in ["قيد التوصيل", "بانتظار الكاشير", "جاري المعالجة"]
-
-def has_active_order(user_id: int) -> bool:
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-
-    # تفترض أن جدول الطلبات فيه عمود status وقيم مثل: pending, in_progress, delivered, cancelled
-    cursor.execute("""
-        SELECT COUNT(*) FROM orders
-        WHERE user_id = ? AND status IN ('pending', 'in_progress')
-    """, (user_id,))
-
-    count = cursor.fetchone()[0]
-    conn.close()
-
-    return count > 0
-
 
 
 
@@ -1416,6 +1427,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 
 
 
+
 async def handle_order_category(update: Update, context: CallbackContext) -> int:
     category = update.message.text
     selected_restaurant = context.user_data.get('selected_restaurant')
@@ -1445,86 +1457,93 @@ async def handle_order_category(update: Update, context: CallbackContext) -> int
                 pass
     context.user_data["current_meal_messages"] = []
 
-    # 🥘 جلب وجبات الفئة
-    cursor = db_conn.cursor()
-    cursor.execute("""
-        SELECT m.id, m.name, m.caption, m.image_message_id, m.size_options
-        FROM meals m
-        JOIN categories c ON m.category_id = c.id
-        JOIN restaurants r ON c.restaurant_id = r.id
-        WHERE c.name = ? AND r.name = ?
-    """, (category, selected_restaurant))
-    meals = cursor.fetchall()
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            # جلب الوجبات في هذه الفئة
+            async with db.execute("""
+                SELECT m.id, m.name, m.caption, m.image_message_id, m.size_options
+                FROM meals m
+                JOIN categories c ON m.category_id = c.id
+                JOIN restaurants r ON c.restaurant_id = r.id
+                WHERE c.name = ? AND r.name = ?
+            """, (category, selected_restaurant)) as cursor:
+                meals = await cursor.fetchall()
 
-    if not meals:
-        await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
+            if not meals:
+                await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
+                return ORDER_CATEGORY
+
+            for meal_id, name, caption, image_message_id, size_options_json in meals:
+                try:
+                    size_options = json.loads(size_options_json or "[]")
+                except json.JSONDecodeError:
+                    size_options = []
+
+                buttons = []
+                if size_options:
+                    size_buttons = [
+                        InlineKeyboardButton(
+                            f"{opt['name']}\n{opt['price']}",
+                            callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
+                        )
+                        for opt in size_options
+                    ]
+                    buttons.append(size_buttons)
+                    buttons.append([
+                        InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
+                    ])
+                else:
+                    buttons.append([
+                        InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default"),
+                        InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
+                    ])
+
+                try:
+                    if image_message_id:
+                        photo_msg = await context.bot.copy_message(
+                            chat_id=update.effective_chat.id,
+                            from_chat_id=ADMIN_MEDIA_CHANNEL,
+                            message_id=int(image_message_id)
+                        )
+                        context.user_data["current_meal_messages"].append(photo_msg.message_id)
+
+                        text = f"🍽️ {name}\n\n{caption}" if caption else name
+                        details_msg = await update.message.reply_text(
+                            text,
+                            reply_markup=InlineKeyboardMarkup(buttons)
+                        )
+                        context.user_data["current_meal_messages"].append(details_msg.message_id)
+                    else:
+                        raise ValueError("image_message_id مفقود.")
+                except Exception as e:
+                    logger.error(f"❌ فشل عرض صورة الوجبة '{name}': {e}")
+                    text = f"🍽️ {name}\n\n{caption}" if caption else name
+                    msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+                    context.user_data["current_meal_messages"].append(msg.message_id)
+
+            # عرض الفئات مرة أخرى
+            async with db.execute("""
+                SELECT c.name FROM categories c
+                JOIN restaurants r ON c.restaurant_id = r.id
+                WHERE r.name = ?
+                ORDER BY c.name
+            """, (selected_restaurant,)) as cursor:
+                rows = await cursor.fetchall()
+
+        categories = [row[0] for row in rows]
+        categories.append("تم ✅")
+
+        reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
+        await update.message.reply_text(
+            "🔽 يمكنك اختيار فئة أخرى أو الضغط على 'تم ✅' عند الانتهاء:",
+            reply_markup=reply_markup
+        )
+        return ORDER_MEAL
+
+    except Exception as e:
+        logger.error(f"Database error in handle_order_category: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
         return ORDER_CATEGORY
-
-    for meal_id, name, caption, image_message_id, size_options_json in meals:
-        try:
-            size_options = json.loads(size_options_json or "[]")
-        except json.JSONDecodeError:
-            size_options = []
-
-        buttons = []
-        if size_options:
-            size_buttons = []
-            for opt in size_options:
-                size_name = opt.get("name")
-                price = opt.get("price")
-                size_buttons.append(
-                    InlineKeyboardButton(
-                        f"{size_name}\n{price}",
-                        callback_data=f"add_meal_with_size:{meal_id}:{size_name}"
-                    )
-                )
-            buttons.append(size_buttons)
-            buttons.append([
-                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
-            ])
-        else:
-            buttons.append([
-                InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default"),
-                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
-            ])
-
-        try:
-            if image_message_id:
-                photo_msg = await context.bot.copy_message(
-                    chat_id=update.effective_chat.id,
-                    from_chat_id=ADMIN_MEDIA_CHANNEL,
-                    message_id=int(image_message_id)
-                )
-                context.user_data["current_meal_messages"].append(photo_msg.message_id)
-
-                text = f"🍽️ {name}\n\n{caption}" if caption else name
-                details_msg = await update.message.reply_text(
-                    text,
-                    reply_markup=InlineKeyboardMarkup(buttons)
-                )
-                context.user_data["current_meal_messages"].append(details_msg.message_id)
-            else:
-                raise ValueError("image_message_id مفقود.")
-        except Exception as e:
-            logger.error(f"❌ فشل عرض صورة الوجبة '{name}': {e}")
-            text = f"🍽️ {name}\n\n{caption}" if caption else name
-            msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
-            context.user_data["current_meal_messages"].append(msg.message_id)
-
-    # ✅ عرض الفئات من جديد
-    cursor.execute("""
-        SELECT c.name FROM categories c
-        JOIN restaurants r ON c.restaurant_id = r.id
-        WHERE r.name = ?
-        ORDER BY c.name
-    """, (selected_restaurant,))
-    categories = [row[0] for row in cursor.fetchall()]
-    categories.append("تم ✅")
-
-    reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
-    await update.message.reply_text("🔽 يمكنك اختيار فئة أخرى أو الضغط على 'تم ✅' عند الانتهاء:", reply_markup=reply_markup)
-
-    return ORDER_MEAL
 
 
 
@@ -1706,15 +1725,20 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
 
 
-def get_meal_names_in_category(category: str, restaurant: str) -> list:
-    cursor = db_conn.cursor()
-    cursor.execute("""
-        SELECT m.name FROM meals m
-        JOIN categories c ON m.category_id = c.id
-        JOIN restaurants r ON c.restaurant_id = r.id
-        WHERE c.name = ? AND r.name = ?
-    """, (category, restaurant))
-    return [row[0] for row in cursor.fetchall()]
+async def get_meal_names_in_category(category: str, restaurant: str) -> list:
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            async with db.execute("""
+                SELECT m.name FROM meals m
+                JOIN categories c ON m.category_id = c.id
+                JOIN restaurants r ON c.restaurant_id = r.id
+                WHERE c.name = ? AND r.name = ?
+            """, (category, restaurant)) as cursor:
+                rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء جلب أسماء الوجبات: {e}")
+        return []
 
 
 
@@ -1792,24 +1816,32 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
 
 
 
+from collections import defaultdict
+
 async def handle_done_adding_meals(update: Update, context: CallbackContext) -> int:
-    orders = context.user_data.get("orders", {})
-    if not isinstance(orders, dict) or not orders:
+    orders = context.user_data.get("orders", [])
+    if not isinstance(orders, list) or not orders:
         await update.message.reply_text("❌ لم تقم بإضافة أي وجبة بعد.")
         return ORDER_MEAL
 
-    total_price = context.user_data.get("temporary_total_price", 0)
+    total_price = sum(item.get("price", 0) for item in orders)
+    context.user_data["temporary_total_price"] = total_price
 
-    summary_lines = []
-    for item_key, count in orders.items():
-        summary_lines.append(f"{count} × {item_key}")
+    # تنظيم الطلبات لتلخيصها
+    summary_counter = defaultdict(int)
+    for item in orders:
+        name = item.get("name", "غير معروف")
+        size = item.get("size", "default")
+        label = f"{name} ({size})" if size != "default" else name
+        summary_counter[label] += 1
 
+    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
     summary_text = "\n".join(summary_lines)
 
-    keyboard = [
-        [KeyboardButton("تخطي ➡️")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    reply_markup = ReplyKeyboardMarkup(
+        [["تخطي ➡️"]],
+        resize_keyboard=True
+    )
 
     await update.message.reply_text(
         f"🛒 *ملخص طلبك:*\n{summary_text}\n\n"
@@ -1826,30 +1858,30 @@ async def handle_done_adding_meals(update: Update, context: CallbackContext) -> 
 
 
 
+
 async def return_to_main_menu(update: Update, context: CallbackContext) -> int:
-    # إعداد خيارات القائمة الرئيسية
     reply_markup = ReplyKeyboardMarkup([
         ["اطلب عالسريع 🔥"],
         ["تعديل معلوماتي 🖊", "التواصل مع الدعم 🎧"],
         ["من نحن 🏢", "أسئلة متكررة ❓"]
     ], resize_keyboard=True)
 
-    # إرسال رسالة للمستخدم
-    await update.message.reply_text("تمت العودة إلى القائمة الرئيسية.", reply_markup=reply_markup)
-
-    # العودة إلى الحالة الرئيسية
+    await update.message.reply_text(
+        "📋 تمت العودة إلى القائمة الرئيسية.",
+        reply_markup=reply_markup
+    )
     return MAIN_MENU
 
 
 
 
 async def handle_order_notes(update: Update, context: CallbackContext) -> int:
-    notes = update.message.text
+    notes = update.message.text.strip()
 
     if notes == "تخطي ➡️":
         context.user_data['order_notes'] = "لا توجد ملاحظات."
     else:
-        context.user_data['order_notes'] = notes
+        context.user_data['order_notes'] = notes or "لا توجد ملاحظات."
 
     reply_markup = ReplyKeyboardMarkup([
         ["لا لم يتغير أنا في موقعي الأساسي 😄"],
@@ -1857,11 +1889,12 @@ async def handle_order_notes(update: Update, context: CallbackContext) -> int:
     ], resize_keyboard=True)
 
     await update.message.reply_text(
-        "✅ تم تسجيل ملاحظاتك.\n"
-        "هل تريد توصيل الطلب إلى موقعك الأساسي المسجل لدينا أم أنك في موقع آخر؟",
+        "✅ تم تسجيل ملاحظاتك.\n\n"
+        "📍 هل تريد توصيل الطلب إلى موقعك الأساسي المسجل لدينا، أم أنك في موقع مختلف حالياً؟",
         reply_markup=reply_markup
     )
     return ASK_ORDER_LOCATION
+
 
 
 
@@ -1918,41 +1951,45 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات.")
         return ASK_ORDER_LOCATION
 
-def fixed_orders_from_legacy_dict(orders_dict, db_conn):
+async def fixed_orders_from_legacy_dict(orders_dict: dict) -> list:
     fixed_orders = []
-    cursor = db_conn.cursor()
 
-    for key, count in orders_dict.items():
-        try:
-            name, size = key.rsplit(" (", 1)
-            size = size.rstrip(")")
-        except:
-            name, size = key, "default"
-
-        cursor.execute("SELECT price, size_options FROM meals WHERE name = ?", (name.strip(),))
-        result = cursor.fetchone()
-
-        price = 0
-        if result:
-            base_price, size_options_json = result
-            if size != "default" and size_options_json:
+    try:
+        async with aiosqlite.connect("database.db") as db:
+            for key, count in orders_dict.items():
                 try:
-                    size_options = json.loads(size_options_json)
-                    for opt in size_options:
-                        if opt["name"] == size:
-                            price = opt["price"]
-                            break
+                    name, size = key.rsplit(" (", 1)
+                    size = size.rstrip(")")
                 except:
-                    price = base_price or 0
-            else:
-                price = base_price or 0
+                    name, size = key, "default"
 
-        for _ in range(count):
-            fixed_orders.append({
-                "name": name.strip(),
-                "size": size.strip(),
-                "price": price
-            })
+                async with db.execute("SELECT price, size_options FROM meals WHERE name = ?", (name.strip(),)) as cursor:
+                    result = await cursor.fetchone()
+
+                price = 0
+                if result:
+                    base_price, size_options_json = result
+                    if size != "default" and size_options_json:
+                        try:
+                            size_options = json.loads(size_options_json)
+                            for opt in size_options:
+                                if opt["name"] == size:
+                                    price = opt["price"]
+                                    break
+                        except:
+                            price = base_price or 0
+                    else:
+                        price = base_price or 0
+
+                for _ in range(count):
+                    fixed_orders.append({
+                        "name": name.strip(),
+                        "size": size.strip(),
+                        "price": price
+                    })
+
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء تحويل الطلبات القديمة: {e}")
 
     return fixed_orders
 
@@ -1962,40 +1999,42 @@ def fixed_orders_from_legacy_dict(orders_dict, db_conn):
 
 
 
-
 async def handle_new_location_image(update: Update, context: CallbackContext) -> int:
-    if update.message.location:
-        latitude = update.message.location.latitude
-        longitude = update.message.location.longitude
+    location = update.message.location
 
-        # حفظ الموقع المؤقت
-        context.user_data['temporary_location_coords'] = {'latitude': latitude, 'longitude': longitude}
+    if location:
+        latitude = location.latitude
+        longitude = location.longitude
 
-        # طلب الموقع النصي المؤقت
+        context.user_data['temporary_location_coords'] = {
+            'latitude': latitude,
+            'longitude': longitude
+        }
+
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
         await update.message.reply_text(
-            "🔍 يرجى كتابة وصف لموقعك الجديد (مثل اسم الحي، الشارع، أو معلم قريب):",
+            "📍 تم استلام موقعك الجديد.\n"
+            "✏️ الآن يرجى كتابة وصف للموقع مثل اسم الحي، الشارع، أو أقرب معلم:",
             reply_markup=reply_markup
         )
         return ASK_NEW_LOCATION_TEXT
 
-    await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام ميزة Telegram.")
+    await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام زر إرسال الموقع.")
     return ASK_NEW_LOCATION_IMAGE
 
-
-
 async def handle_new_location_text(update: Update, context: CallbackContext) -> int:
-    context.user_data['temporary_location_text'] = update.message.text
+    text = update.message.text.strip()
+
+    if not text:
+        await update.message.reply_text("❌ يرجى إدخال وصف واضح للموقع.")
+        return ASK_NEW_LOCATION_TEXT
+
+    context.user_data['temporary_location_text'] = text
     return await show_order_summary(update, context, is_new_location=True)
 
 
 
-
-
 async def ask_new_location(update: Update, context: CallbackContext) -> int:
-    """
-    معالجة خيار 'نعم لقد تغير موقعي'، وطلب الموقع الجغرافي الجديد.
-    """
     location_button = KeyboardButton("📍 إرسال موقعي", request_location=True)
     reply_markup = ReplyKeyboardMarkup([[location_button], ["عودة ⬅️"]], resize_keyboard=True)
 
@@ -2007,31 +2046,39 @@ async def ask_new_location(update: Update, context: CallbackContext) -> int:
     return ASK_NEW_LOCATION_IMAGE
 
 
-async def handle_new_location(update: Update, context: CallbackContext) -> int:
-    """
-    معالجة الموقع الجغرافي الجديد وإعداد المرحلة التالية لطلب وصف الموقع.
-    """
-    if update.message.location:
-        latitude = update.message.location.latitude
-        longitude = update.message.location.longitude
 
-        # تخزين الموقع الجغرافي مؤقتًا
-        context.user_data['temporary_location_coords'] = {'latitude': latitude, 'longitude': longitude}
+async def handle_new_location(update: Update, context: CallbackContext) -> int:
+    location = update.message.location
+
+    if location:
+        latitude = location.latitude
+        longitude = location.longitude
+
+        context.user_data['temporary_location_coords'] = {
+            'latitude': latitude,
+            'longitude': longitude
+        }
 
         reply_markup = ReplyKeyboardMarkup([["عودة ⬅️"]], resize_keyboard=True)
         await update.message.reply_text(
             "✅ تم استلام موقعك الجديد.\n\n"
-            "🔍 يرجى كتابة وصف لموقعك الجديد (مثل اسم الحي، الشارع، أو معلم قريب):",
+            "✏️ يرجى كتابة وصف لموقعك الجديد (مثل اسم الحي، الشارع، أو معلم قريب):",
             reply_markup=reply_markup
         )
         return ASK_NEW_LOCATION_TEXT
 
-    else:
-        await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام الزر لإرسال موقعك.")
-        return ASK_NEW_LOCATION_IMAGE
+    await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام الزر لإرسال موقعك.")
+    return ASK_NEW_LOCATION_IMAGE
+
 
 async def handle_new_location_description(update: Update, context: CallbackContext) -> int:
-    context.user_data['temporary_location_text'] = update.message.text
+    text = update.message.text.strip()
+
+    if not text:
+        await update.message.reply_text("❌ يرجى إدخال وصف واضح لموقعك الجديد.")
+        return ASK_NEW_LOCATION_TEXT
+
+    context.user_data['temporary_location_text'] = text
     return await show_order_summary(update, context, is_new_location=True)
 
 
@@ -2041,31 +2088,56 @@ async def ask_new_location_text(update: Update, context: CallbackContext) -> int
     if update.message.text == "عودة ➡️":
         return await ask_order_location(update, context)
 
-    context.user_data['temporary_location_text'] = update.message.text
+    text = update.message.text.strip()
+
+    if not text:
+        await update.message.reply_text("❌ يرجى كتابة وصف واضح للموقع.")
+        return ASK_NEW_LOCATION_TEXT
+
+    context.user_data['temporary_location_text'] = text
     return await show_order_summary(update, context, is_new_location=True)
 
 
 
+
+from collections import defaultdict
+
 async def show_order_summary(update: Update, context: CallbackContext, is_new_location=False) -> int:
     orders = context.user_data.get("orders", [])
+
     if isinstance(orders, dict):
-        # تحويل الصيغة القديمة
-        orders_list = []
+        # تحويل النظام القديم إلى list of dicts
+        converted = []
         for name_size, count in orders.items():
-            name, size = name_size.rsplit(" (", 1)
-            size = size.rstrip(")")
+            try:
+                name, size = name_size.rsplit(" (", 1)
+                size = size.rstrip(")")
+            except:
+                name, size = name_size, "default"
+
             price = context.user_data.get('temporary_total_price', 0) // sum(orders.values())
             for _ in range(count):
-                orders_list.append({"name": name, "size": size, "price": price})
-        orders = orders_list
+                converted.append({"name": name.strip(), "size": size.strip(), "price": price})
+        orders = converted
         context.user_data["orders"] = orders
+
+    if not orders:
+        await update.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
+        return ORDER_MEAL
 
     total_price = sum(item['price'] for item in orders)
     context.user_data['temporary_total_price'] = total_price
 
-    summary = "\n".join([f"{item['name']} ({item['size']}) - {item['price']} ل.س" for item in orders])
+    # تلخيص الوجبات مع التكرار
+    summary_counter = defaultdict(int)
+    for item in orders:
+        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
+        summary_counter[label] += 1
 
-    location_text = context.user_data.get("temporary_location_text", "") if is_new_location else "الموقع الأساسي"
+    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
+    summary_text = "\n".join(summary_lines)
+
+    location_text = context.user_data.get("temporary_location_text", "الموقع الأساسي") if is_new_location else "الموقع الأساسي"
 
     reply_markup = ReplyKeyboardMarkup([
         ["يالله عالسريع 🔥"],
@@ -2073,11 +2145,12 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
     ], resize_keyboard=True)
 
     await update.message.reply_text(
-        f"📋 ملخص الطلب:\n{summary}\n\n"
-        f"📍 الموقع: {location_text}\n"
-        f"💰 المجموع الكلي: {total_price} ل.س\n\n"
+        f"📋 *ملخص الطلب:*\n{summary_text}\n\n"
+        f"📍 *الموقع:* {location_text}\n"
+        f"💰 *المجموع:* {total_price} ل.س\n\n"
         "شو حابب نعمل؟",
-        reply_markup=reply_markup
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
     )
     return CONFIRM_FINAL_ORDER
 
@@ -2333,30 +2406,33 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
 
 async def handle_order_received(update: Update, context: CallbackContext) -> int:
     """
-    عند اختيار 'وصل طلبي شكرا لكم 🙏' يتم حذف بيانات الطلب فقط للتمكن من بدء طلب جديد،
-    ثم تظهر خيارات التقييم باستخدام رموز النجوم فقط.
+    عند اختيار 'وصل طلبي شكراً لكم 🙏' يتم حذف بيانات الطلب مؤقتاً،
+    ثم عرض خيارات التقييم عبر النجوم.
     """
-    # حذف بيانات الطلب فقط
-    keys_to_remove = ['order_data', 'orders', 'selected_restaurant']
-    for key in keys_to_remove:
+
+    # 🧹 حذف بيانات الطلب
+    for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
         context.user_data.pop(key, None)
 
-    # رسالة شكر
+    # 💬 رسالة الشكر
     await update.message.reply_text(
-        "شكراً لك! ❤️ سعيدون بخدمتك ☺️.\n"
-        "نأمل أن تستمتع بطلبك ونتطلع لخدمتك مجددًا!"
+        "🙏 شكراً لك! سعيدون بخدمتك ❤️\n"
+        "نتمنى أن تكون استمتعت بطلبك 🍽️ ونتطلع لخدمتك مجددًا!"
     )
 
-    # عرض خيارات التقييم باستخدام رموز النجوم فقط
-    reply_markup = ReplyKeyboardMarkup([
-        ["⭐"], ["⭐⭐"], ["⭐⭐⭐"], ["⭐⭐⭐⭐"], ["⭐⭐⭐⭐⭐"]
-    ], resize_keyboard=True)
+    # 🌟 عرض خيارات التقييم
+    reply_markup = ReplyKeyboardMarkup(
+        [["⭐"], ["⭐⭐"], ["⭐⭐⭐"], ["⭐⭐⭐⭐"], ["⭐⭐⭐⭐⭐"]],
+        resize_keyboard=True
+    )
+
     await update.message.reply_text(
-        "كيف كانت تجربتك مع هذا المطعم؟ اختر عدد النجوم للتقييم:",
+        "✨ كيف كانت تجربتك مع هذا المطعم؟ اختر عدد النجوم للتقييم:",
         reply_markup=reply_markup
     )
 
     return ASK_RATING
+
 
 
 
