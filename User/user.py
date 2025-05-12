@@ -230,6 +230,7 @@ def get_main_menu():
 
 # الوظائف
 from urllib.parse import unquote
+
 async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
     if update:
         user_id = update.effective_user.id
@@ -3738,7 +3739,7 @@ async def run_user_bot():
         filters.ChatType.CHANNEL & filters.TEXT,
         handle_cashier_interaction
     ))
-    application.add_handler(CommandHandler("start", handle_vip_start))
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
         handle_vip_broadcast_message
