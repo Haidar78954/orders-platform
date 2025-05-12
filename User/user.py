@@ -244,7 +244,8 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
 
     # ✅ تفريغ كل بيانات المستخدم عند كل /start
     context.user_data.clear()
-
+    print("🚀 دالة start تعمل من النسخة الجديدة!")
+    
     # ✅ حماية من إجراءات جارية (بقيت للاحتياط)
     if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
         if message:
