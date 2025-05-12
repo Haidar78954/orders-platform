@@ -3726,10 +3726,10 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", start)]
 )
 
-def run_user_bot():
+async def run_user_bot():
     application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
-    # إضافة معالجات
+    # إضافة المعالجات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
 
@@ -3759,11 +3759,15 @@ def run_user_bot():
 
     application.add_error_handler(error_handler)
 
-    # ✅ الآن هذا السطر آمن
-    application.run_polling()
+    # ✅ قاعدة البيانات
+    await initialize_database()
+
+    # ✅ التشغيل بشكل متوافق مع asyncio
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    await application.updater.wait()
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(initialize_database())  # ← هذا فقط async
-    run_user_bot()  # ← دالة sync لا تحتاج asyncio.run()
+    asyncio.run(run_user_bot())
