@@ -3724,7 +3724,7 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", start)]
 )
 async def run_user_bot():
-    application = Application.builder().token("YOUR_TOKEN_HERE").build()
+    application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
     # ✅ يجب أن يكون أول هاندلر
     application.add_handler(CommandHandler("start", start))
