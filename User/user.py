@@ -230,7 +230,6 @@ def get_main_menu():
 
 # الوظائف
 from urllib.parse import unquote
-
 async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
     # ✅ دعم استدعاء start بدون update (عند reset_user_and_restart)
     if update:
@@ -268,8 +267,14 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
                 )
             return ConversationHandler.END
 
-        if args[0].startswith("vip_"):
+        elif args[0].startswith("vip_"):
             return await handle_vip_start(update, context)
+
+        else:
+            # ✅ حالة رابط غير معروف
+            if message:
+                await message.reply_text("❌ رابط الإعلان غير صالح.")
+            return ConversationHandler.END
 
     # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
@@ -296,7 +301,6 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         )
 
     return ASK_INFO
-
 
 
 
