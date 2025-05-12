@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # متغير عالمي لتخزين الطلبات إن لزم
 user_orders = {}
 
-
+print("✅ بدأ تشغيل user.py فعليًا")  # ← هذا هو مكانه المثالي
 
 
 async def initialize_database():
