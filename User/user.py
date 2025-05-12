@@ -3729,10 +3729,9 @@ conv_handler = ConversationHandler(
 async def run_user_bot():
     application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
-    # إضافة المعالجات
+    # المعالجات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
-
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
@@ -3745,7 +3744,6 @@ async def run_user_bot():
         filters.ChatType.CHANNEL & filters.TEXT,
         handle_cashier_interaction
     ))
-
     application.add_handler(CommandHandler("start", handle_vip_start))
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
@@ -3753,20 +3751,19 @@ async def run_user_bot():
     ))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
 
+    # المهام المجدولة
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
     application.add_error_handler(error_handler)
 
-    # ✅ قاعدة البيانات
+    # قاعدة البيانات
     await initialize_database()
 
-    # ✅ التشغيل بشكل متوافق مع asyncio
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    await application.updater.wait()
+    # ✅ التشغيل الآمن
+    await application.run_polling()
+
 
 
 if __name__ == "__main__":
