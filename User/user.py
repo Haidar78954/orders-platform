@@ -3729,7 +3729,7 @@ conv_handler = ConversationHandler(
 async def run_user_bot():
     application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
-    # المعالجات
+    # إضافة المعالجات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
     application.add_handler(MessageHandler(
@@ -3751,18 +3751,19 @@ async def run_user_bot():
     ))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
 
-    # المهام المجدولة
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
     application.add_error_handler(error_handler)
 
-    # قاعدة البيانات
     await initialize_database()
 
-    # ✅ التشغيل الآمن
-    await application.run_polling()
+    # ✅ حلقة تشغيل مستقلة وآمنة
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+
 
 
 
