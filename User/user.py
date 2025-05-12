@@ -1,4 +1,4 @@
-import sqlite3
+import aiosqlite
 import asyncio
 import random
 import re
@@ -408,22 +408,30 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
     if entered_code == str(context.user_data['verification_code']):
         await update.message.reply_text("✅ تم التحقق من الرقم بنجاح.")
 
-        # حفظ البيانات في قاعدة البيانات
         user_id = update.effective_user.id
         name = context.user_data['name']
         phone = context.user_data['phone']
 
-        cursor = db_conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO user_data (user_id, name, phone) VALUES (?, ?, ?)",
-                       (user_id, name, phone))
-        db_conn.commit()
+        try:
+            async with aiosqlite.connect("database.db") as db:
+                await db.execute(
+                    "INSERT OR REPLACE INTO user_data (user_id, name, phone) VALUES (?, ?, ?)",
+                    (user_id, name, phone)
+                )
+                await db.commit()
 
-        # ✅ سحب المحافظات من قاعدة البيانات
-        cursor.execute("SELECT name FROM provinces")
-        provinces = [row[0] for row in cursor.fetchall()]
+                # ✅ سحب المحافظات من قاعدة البيانات
+                async with db.execute("SELECT name FROM provinces") as cursor:
+                    rows = await cursor.fetchall()
+                    provinces = [row[0] for row in rows]
+
+        except aiosqlite.Error as e:
+            logger.error(f"Database error in verify_code: {e}")
+            await update.message.reply_text("❌ حدث خطأ أثناء حفظ بياناتك. حاول لاحقًا.")
+            return ASK_PHONE_VERIFICATION
+
         provinces.append("عودة ➡️")
 
-        # ✅ عرض المحافظات للمستخدم
         reply_markup = ReplyKeyboardMarkup(
             [[p for p in provinces[i:i+3]] for i in range(0, len(provinces), 3)],
             resize_keyboard=True
@@ -847,13 +855,18 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
 async def main_menu(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
-    cursor = db_conn.cursor()
 
     if choice == "تعديل معلوماتي 🖊":
-        cursor.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
-        db_conn.commit()
-        await update.message.reply_text("تم حذف بياناتك. سنبدأ من جديد 😊.")
-        return await start(update, context)
+        try:
+            async with aiosqlite.connect("database.db") as db:
+                await db.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
+                await db.commit()
+            await update.message.reply_text("تم حذف بياناتك. سنبدأ من جديد 😊.")
+            return await start(update, context)
+        except aiosqlite.Error as e:
+            logger.error(f"Database error in تعديل معلوماتي: {e}")
+            await update.message.reply_text("❌ حدث خطأ أثناء تعديل معلوماتك. حاول لاحقًا.")
+            return MAIN_MENU
 
     elif choice == "التواصل مع الدعم 🎧":
         await update.message.reply_text("للتواصل مع الدعم: @Support")
@@ -878,7 +891,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             "- *ماذا يحدث إذا عبثت مع المطاعم بإلغاء الطلبات أو عدم التواجد عند وصول الديلفري؟*\n"
             "  ❌ سيتم ملاحقتك قانونياً لضمان حق المطاعم.\n\n"
             "- *هل يتم حفظ بياناتي؟*\n"
-            "  ✅ نعم، يتم حفظ البيانات لضمان تجربة أفضل عند الطلب مجدداً.",
+            "  ✅ نعم، يتم حفظ البيانات لضمان تجربة أفضل عند الطلب مجددًا.",
             parse_mode="Markdown"
         )
         return MAIN_MENU
@@ -907,70 +920,79 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                     'orders', 'order_confirmed', 'selected_restaurant']:
             context.user_data.pop(key, None)
 
-        # ✅ التحقق من الرقم المحفوظ
-        cursor.execute("SELECT phone FROM user_data WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        if not result:
-            await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
-            return await start(update, context)
+        try:
+            async with aiosqlite.connect("database.db") as db:
+                # التحقق من الرقم المحفوظ
+                async with db.execute("SELECT phone FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                    result = await cursor.fetchone()
+                    if not result:
+                        await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
+                        return await start(update, context)
+                    phone = result[0]
 
-        phone = result[0]
+                # التحقق مما إذا كان الرقم محظورًا
+                async with db.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = ?", (phone,)) as cursor:
+                    if await cursor.fetchone():
+                        await update.message.reply_text(
+                            "❌ عذرًا، رقمك محظور مؤقتاً من استخدام الخدمة.\n"
+                            "للاستفسار ورفع الحظر، يرجى التواصل مع فريق الدعم: @Support"
+                        )
+                        return MAIN_MENU
 
-        # ✅ التحقق مما إذا كان الرقم محظورًا
-        cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = ?", (phone,))
-        if cursor.fetchone():
-            await update.message.reply_text(
-                "❌ عذرًا، رقمك محظور مؤقتاً من استخدام الخدمة.\n"
-                "للاستفسار ورفع الحظر، يرجى التواصل مع فريق الدعم: @Support"
-            )
+                # جلب اسم المدينة
+                async with db.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if not row:
+                        await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
+                        return await start(update, context)
+                    city_name = row[0]
+
+                # جلب معرف المدينة
+                async with db.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+                    city_row = await cursor.fetchone()
+                    if not city_row:
+                        await update.message.reply_text("❌ لم يتم العثور على معرف المدينة. يرجى إعادة التسجيل.")
+                        return await start(update, context)
+                    city_id = city_row[0]
+
+                # جلب المطاعم
+                async with db.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
+                    rows = await cursor.fetchall()
+
+                restaurants = []
+                restaurant_map = {}
+
+                for restaurant_id, name, is_frozen in rows:
+                    if is_frozen:
+                        continue
+
+                    async with db.execute("SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?", (name,)) as rating_cursor:
+                        rating_data = await rating_cursor.fetchone()
+
+                    if rating_data and rating_data[0] > 0:
+                        average = round(rating_data[1] / rating_data[0], 1)
+                        display_name = f"{name} ⭐ ({average})"
+                    else:
+                        display_name = f"{name} ⭐ (0)"
+
+                    restaurants.append(display_name)
+                    restaurant_map[display_name] = name
+
+                restaurants += ["لم يذكر مطعمي؟ 😕", "القائمة الرئيسية 🪧"]
+                context.user_data['restaurant_map'] = restaurant_map
+
+                reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
+                await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
+                return SELECT_RESTAURANT
+
+        except aiosqlite.Error as e:
+            logger.error(f"Database error in fast order: {e}")
+            await update.message.reply_text("❌ حدث خطأ أثناء معالجة الطلب السريع.")
             return MAIN_MENU
 
-        # ✅ جلب اسم المدينة من user_data
-        cursor.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
-        if not row:
-            await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
-            return await start(update, context)
-
-        city_name = row[0]
-
-        # ✅ جلب معرف المدينة
-        cursor.execute("SELECT id FROM cities WHERE name = ?", (city_name,))
-        city_row = cursor.fetchone()
-        if not city_row:
-            await update.message.reply_text("❌ لم يتم العثور على معرف المدينة. يرجى إعادة التسجيل.")
-            return await start(update, context)
-
-        city_id = city_row[0]
-
-        # ✅ استعلام عن المطاعم في المدينة باستخدام city_id
-        cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,))
-        rows = cursor.fetchall()
-
-        restaurants = []
-        restaurant_map = {}
-        for restaurant_id, name, is_frozen in rows:
-            if is_frozen:
-                continue
-
-            cursor.execute("SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?", (name,))
-            rating_data = cursor.fetchone()
-            if rating_data and rating_data[0] > 0:
-                average = round(rating_data[1] / rating_data[0], 1)
-                display_name = f"{name} ⭐ ({average})"
-            else:
-                display_name = f"{name} ⭐ (0)"
-
-            restaurants.append(display_name)
-            restaurant_map[display_name] = name
-
-        restaurants += ["لم يذكر مطعمي؟ 😕", "القائمة الرئيسية 🪧"]
-        context.user_data['restaurant_map'] = restaurant_map
-
-        reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
-        await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
-        return SELECT_RESTAURANT
-
+    else:
+        await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
+        return MAIN_MENU
 
 
 
@@ -2038,9 +2060,6 @@ async def handle_confirm_final_order(update: Update, context: CallbackContext) -
     choice = update.message.text
 
     if choice == "يالله عالسريع 🔥":
-        import random, string
-        from datetime import datetime
-
         order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=15))
 
         user_id = update.effective_user.id
@@ -2050,7 +2069,7 @@ async def handle_confirm_final_order(update: Update, context: CallbackContext) -
         location_text = context.user_data.get('temporary_location_text', context.user_data.get('location_text', 'غير متوفر'))
         orders = context.user_data.get('orders', [])
 
-        # ✅ إصلاح الخطأ: إذا كانت الطلبات dict (النظام القديم) نحولها إلى list of dicts
+        # ✅ إصلاح الطلبات القديمة dict → list
         if isinstance(orders, dict):
             converted_orders = []
             for name_size, count in orders.items():
@@ -2080,83 +2099,78 @@ async def handle_confirm_final_order(update: Update, context: CallbackContext) -
             for item in orders
         ])
 
-        cursor = db_conn.cursor()
-
-        # جلب رقم الطلب المتسلسل
-        cursor.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant = ?", (selected_restaurant,))
-        result = cursor.fetchone()
-        if result:
-            last_order_number = result[0]
-        else:
-            last_order_number = 0
-            cursor.execute("INSERT INTO restaurant_order_counter (restaurant, last_order_number) VALUES (?, ?)", (selected_restaurant, 0))
-
-        order_number = last_order_number + 1
-        cursor.execute("UPDATE restaurant_order_counter SET last_order_number = ? WHERE restaurant = ?", (order_number, selected_restaurant))
-
-        # جلب قناة المطعم
-        cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
-        result = cursor.fetchone()
-        restaurant_channel = result[0] if result else None
-
-        if not restaurant_channel:
-            await update.message.reply_text("❌ حدث خطأ: لم يتم العثور على القناة المخصصة لهذا المطعم.")
-            return MAIN_MENU
-
-        db_conn.commit()
-
-        order_message = (
-            f"🔔 *طلب جديد - معرف الطلب:* `{order_id}` 🔔\n"
-            f"📌 *رقم الطلب:* `{order_number}`\n\n"
-            f"👤 *الزبون:*\n"
-            f" - الاسم: {name}\n"
-            f" - رقم الهاتف: {phone}\n"
-            f" - معرف التلغرام: @{update.effective_user.username if update.effective_user.username else 'غير متوفر'}\n"
-            f" - رقم التلغرام: {user_id}\n\n"
-            f"🛒 *الطلب:*\n"
-            f"{order_summary}\n\n"
-            f"📋 *ملاحظات:*\n{context.user_data.get('order_notes', 'لا توجد ملاحظات.')}\n\n"
-            f"💰 *المجموع الكلي:* {total_price} ل.س\n\n"
-            f"📍 *العنوان الكتابي:*\n{location_text}"
-        )
-
         try:
-            if location_coords:
-                location_message = await context.bot.send_location(
-                    chat_id=restaurant_channel,
-                    latitude=location_coords.get('latitude'),
-                    longitude=location_coords.get('longitude')
+            async with aiosqlite.connect("database.db") as db:
+                # جلب رقم الطلب المتسلسل
+                async with db.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant = ?", (selected_restaurant,)) as cursor:
+                    result = await cursor.fetchone()
+                    last_order_number = result[0] if result else 0
+
+                if not result:
+                    await db.execute("INSERT INTO restaurant_order_counter (restaurant, last_order_number) VALUES (?, ?)", (selected_restaurant, 0))
+
+                order_number = last_order_number + 1
+                await db.execute("UPDATE restaurant_order_counter SET last_order_number = ? WHERE restaurant = ?", (order_number, selected_restaurant))
+
+                # جلب قناة المطعم
+                async with db.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,)) as cursor:
+                    result = await cursor.fetchone()
+                    restaurant_channel = result[0] if result else None
+
+                if not restaurant_channel:
+                    await update.message.reply_text("❌ حدث خطأ: لم يتم العثور على القناة المخصصة لهذا المطعم.")
+                    return MAIN_MENU
+
+                order_message = (
+                    f"🔔 *طلب جديد - معرف الطلب:* `{order_id}` 🔔\n"
+                    f"📌 *رقم الطلب:* `{order_number}`\n\n"
+                    f"👤 *الزبون:*\n"
+                    f" - الاسم: {name}\n"
+                    f" - رقم الهاتف: {phone}\n"
+                    f" - معرف التلغرام: @{update.effective_user.username if update.effective_user.username else 'غير متوفر'}\n"
+                    f" - رقم التلغرام: {user_id}\n\n"
+                    f"🛒 *الطلب:*\n"
+                    f"{order_summary}\n\n"
+                    f"📋 *ملاحظات:*\n{context.user_data.get('order_notes', 'لا توجد ملاحظات.')}\n\n"
+                    f"💰 *المجموع الكلي:* {total_price} ل.س\n\n"
+                    f"📍 *العنوان الكتابي:*\n{location_text}"
                 )
 
-                context.bot_data[location_message.message_id] = {
+                # إرسال الموقع والطلب
+                if location_coords:
+                    location_message = await context.bot.send_location(
+                        chat_id=restaurant_channel,
+                        latitude=location_coords.get('latitude'),
+                        longitude=location_coords.get('longitude')
+                    )
+                    context.bot_data[location_message.message_id] = {
+                        "user_id": user_id,
+                        "order_id": order_id,
+                        "selected_restaurant": selected_restaurant,
+                        "timestamp": datetime.now()
+                    }
+
+                sent_message = await context.bot.send_message(
+                    chat_id=restaurant_channel,
+                    text=order_message,
+                    parse_mode="Markdown"
+                )
+                context.bot_data[sent_message.message_id] = {
                     "user_id": user_id,
                     "order_id": order_id,
                     "selected_restaurant": selected_restaurant,
                     "timestamp": datetime.now()
                 }
 
-            sent_message = await context.bot.send_message(
-                chat_id=restaurant_channel,
-                text=order_message,
-                parse_mode="Markdown"
-            )
+                await db.execute("INSERT INTO user_orders (order_id, user_id, restaurant) VALUES (?, ?, ?)",
+                                 (order_id, user_id, selected_restaurant))
+                await db.commit()
 
-            context.bot_data[sent_message.message_id] = {
-                "user_id": user_id,
-                "order_id": order_id,
-                "selected_restaurant": selected_restaurant,
-                "timestamp": datetime.now()
-            }
-
-            cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant) VALUES (?, ?, ?)",
-                           (order_id, user_id, selected_restaurant))
-            db_conn.commit()
-            user_orders[order_id] = user_id
-
-            await update.message.reply_text("✅ تم إرسال طلبك إلى المطعم بنجاح. سيتم إخطارك عند بدء التحضير.")
+                user_orders[order_id] = user_id
+                await update.message.reply_text("✅ تم إرسال طلبك إلى المطعم بنجاح. سيتم إخطارك عند بدء التحضير.")
 
         except Exception as e:
-            logger.error(f"❌ خطأ أثناء إرسال الطلب إلى القناة: {e}")
+            logger.error(f"❌ خطأ أثناء إرسال الطلب أو التعامل مع قاعدة البيانات: {e}")
             await update.message.reply_text("❌ حدث خطأ أثناء إرسال الطلب. يرجى المحاولة مرة أخرى.")
             return MAIN_MENU
 
@@ -2198,7 +2212,6 @@ async def handle_confirm_final_order(update: Update, context: CallbackContext) -
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
-
 
 
 
