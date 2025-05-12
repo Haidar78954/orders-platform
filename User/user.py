@@ -232,50 +232,70 @@ def get_main_menu():
 # الوظائف
 from urllib.parse import unquote
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    user_id = update.effective_user.id
+async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
+    # ✅ دعم استدعاء start بدون update (عند reset_user_and_restart)
+    if update:
+        user_id = update.effective_user.id
+        message = update.message
+        args = context.args if hasattr(context, "args") else []
+    else:
+        message = None
+        args = []
 
-    # ✅ حماية من إجراء جارٍ (تذكير/إلغاء)
+    # ✅ حماية من إجراءات جارية (تذكير أو إلغاء)
     if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
-        await update.message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمه أو ألغِه قبل فتح عروض جديدة.")
+        if message:
+            await message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمّه أو ألغِه قبل فتح عروض جديدة.")
         return ConversationHandler.END
 
-    # ✅ حماية من الضغط المتكرر
-    if context.user_data.get("ad_click_lock"):
+    # ✅ حماية من الضغط المتكرر (تحقق بالزمن بدلاً من asyncio.sleep)
+    now = datetime.now()
+    last_click = context.user_data.get("last_ad_click_time")
+    if last_click and (now - last_click).total_seconds() < 2:
         return ConversationHandler.END
-    context.user_data["ad_click_lock"] = True
-    await asyncio.sleep(1)
-    context.user_data["ad_click_lock"] = False
+    context.user_data["last_ad_click_time"] = now
 
-    # ✅ إذا دخل من إعلان عادي
-    if args and args[0].startswith("go_"):
-        await update.message.reply_text(
-            "📢 *يالله عالسرييع 🔥*\n\n"
-            "وصلت من إعلان، لتكمل:\n"
-            "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
-            "➤ ثم اختر المطعم اللي شفته\n\n"
-            "👇 وبلّش شوف العروض 👇",
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END
+    # ✅ التعامل مع الإعلانات
+    if args and len(args) > 0:
+        if args[0].startswith("go_"):
+            if message:
+                await message.reply_text(
+                    "📢 *يالله عالسرييع 🔥*\n\n"
+                    "وصلت من إعلان، لتكمل:\n"
+                    "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
+                    "➤ ثم اختر المطعم اللي شفته\n\n"
+                    "👇 وبلّش شوف العروض 👇",
+                    parse_mode="Markdown"
+                )
+            return ConversationHandler.END
 
-    # ✅ إذا دخل من إعلان VIP
-    if args and args[0].startswith("vip_"):
-        return await handle_vip_start(update, context)
+        if args[0].startswith("vip_"):
+            return await handle_vip_start(update, context)
 
-    # ✅ الدخول العادي (بدون إعلان)
+    # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
         ["تفاصيل عن الأسئلة وما الغاية منها"],
         ["املأ بياناتي"]
     ], resize_keyboard=True)
 
-    await update.message.reply_text(
-        "أهلا وسهلا 🌹\n"
-        "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-        "غايتنا نخدمك بأفضل طريقة 👌",
-        reply_markup=reply_markup
-    )
+    if message:
+        await message.reply_text(
+            "أهلاً وسهلاً 🌹\n"
+            "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
+            "غايتنا نخدمك بأفضل طريقة 👌",
+            reply_markup=reply_markup
+        )
+    else:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "أهلاً وسهلاً 🌹\n"
+                "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
+                "غايتنا نخدمك بأفضل طريقة 👌"
+            ),
+            reply_markup=reply_markup
+        )
+
     return ASK_INFO
 
 
@@ -1304,122 +1324,119 @@ async def has_active_order(user_id: int) -> bool:
 
 async def handle_missing_restaurant(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-    cursor = db_conn.cursor()
-
-    # التحقق من أن المستخدم اختار "عودة"
-    if update.message.text == "عودة ➡️":
-        # استرجاع اسم المدينة للمستخدم
-        cursor.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,))
-        city_row = cursor.fetchone()
-        if not city_row:
-            await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
-            return await start(update, context)
-
-        city_name = city_row[0]
-
-        # جلب معرف المدينة
-        cursor.execute("SELECT id FROM cities WHERE name = ?", (city_name,))
-        city_id_row = cursor.fetchone()
-        if not city_id_row:
-            await update.message.reply_text("❌ لم يتم العثور على معرف المدينة.")
-            return await start(update, context)
-
-        city_id = city_id_row[0]
-
-        # جلب المطاعم من المدينة عبر city_id
-        cursor.execute("SELECT name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,))
-        rows = cursor.fetchall()
-
-        restaurants = []
-        restaurant_map = {}
-        for name, is_frozen in rows:
-            if is_frozen:
-                continue
-
-            cursor.execute("""
-                SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?
-            """, (name,))
-            rating_data = cursor.fetchone()
-
-            if rating_data and rating_data[0] > 0:
-                average_rating = round(rating_data[1] / rating_data[0], 1)
-                display_name = f"{name} ⭐ ({average_rating})"
-            else:
-                display_name = f"{name} ⭐ (0)"
-
-            restaurants.append(display_name)
-            restaurant_map[display_name] = name
-
-        restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
-        context.user_data['restaurant_map'] = restaurant_map
-
-        reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
-        await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
-        return SELECT_RESTAURANT
-
-    # إذا كتب المستخدم اسم مطعم جديد
-    missing_restaurant_name = update.message.text
-    missing_restaurant_channel = "@Lamtozkar"  # ضع معرف القناة الصحيح هنا
-
-    # جلب اسم المدينة والمحافظة من user_data
-    cursor.execute("SELECT city, province FROM user_data WHERE user_id = ?", (user_id,))
-    location_row = cursor.fetchone()
-    city_name = location_row[0] if location_row else "غير معروفة"
-    province_name = location_row[1] if location_row else "غير معروفة"
+    text = update.message.text.strip()
 
     try:
-        await context.bot.send_message(
-            chat_id=missing_restaurant_channel,
-            text=f"📢 زبون جديد اقترح إضافة مطعم:\n\n"
-                 f"🏪 اسم المطعم: {missing_restaurant_name}\n"
-                 f"🌍 المدينة: {city_name}\n"
-                 f"📍 المحافظة: {province_name}\n\n"
-                 f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
-        )
-        await update.message.reply_text("✅ تم إرسال اسم المطعم بنجاح. سنقوم بالتواصل معه قريباً! 🙏")
+        async with aiosqlite.connect("database.db") as db:
+            if text == "عودة ➡️":
+                # استرجاع المدينة
+                async with db.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                if not row:
+                    await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
+                    return await start(update, context)
+                city_name = row[0]
+
+                # جلب معرف المدينة
+                async with db.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+                    row = await cursor.fetchone()
+                if not row:
+                    await update.message.reply_text("❌ لم يتم العثور على معرف المدينة.")
+                    return await start(update, context)
+                city_id = row[0]
+
+                # جلب المطاعم
+                async with db.execute("SELECT name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
+                    rows = await cursor.fetchall()
+
+                restaurants = []
+                restaurant_map = {}
+
+                for name, is_frozen in rows:
+                    if is_frozen:
+                        continue
+                    async with db.execute("SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?", (name,)) as rating_cursor:
+                        rating_data = await rating_cursor.fetchone()
+
+                    if rating_data and rating_data[0] > 0:
+                        avg = round(rating_data[1] / rating_data[0], 1)
+                        display_name = f"{name} ⭐ ({avg})"
+                    else:
+                        display_name = f"{name} ⭐ (0)"
+
+                    restaurants.append(display_name)
+                    restaurant_map[display_name] = name
+
+                restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
+                context.user_data["restaurant_map"] = restaurant_map
+
+                reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
+                await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
+                return SELECT_RESTAURANT
+
+            # المستخدم كتب اسم مطعم مفقود
+            missing_restaurant_name = text
+            missing_restaurant_channel = "@Lamtozkar"
+
+            async with db.execute("SELECT city, province FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+            city_name = row[0] if row else "غير معروفة"
+            province_name = row[1] if row else "غير معروفة"
+
+            try:
+                await context.bot.send_message(
+                    chat_id=missing_restaurant_channel,
+                    text=f"📢 زبون جديد اقترح إضافة مطعم:\n\n"
+                         f"🏪 اسم المطعم: {missing_restaurant_name}\n"
+                         f"🌍 المدينة: {city_name}\n"
+                         f"📍 المحافظة: {province_name}\n\n"
+                         f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
+                )
+                await update.message.reply_text("✅ تم إرسال اسم المطعم بنجاح. سنقوم بالتواصل معه قريباً! 🙏")
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء إرسال اسم المطعم إلى القناة: {e}")
+                await update.message.reply_text("❌ حدث خطأ أثناء إرسال اسم المطعم. يرجى المحاولة لاحقاً.")
+
+            # إعادة عرض المطاعم
+            async with db.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                await update.message.reply_text("❌ لم يتم العثور على معرف المدينة.")
+                return await start(update, context)
+            city_id = row[0]
+
+            async with db.execute("SELECT name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
+                rows = await cursor.fetchall()
+
+            restaurants = []
+            restaurant_map = {}
+
+            for name, is_frozen in rows:
+                if is_frozen:
+                    continue
+                async with db.execute("SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?", (name,)) as rating_cursor:
+                    rating_data = await rating_cursor.fetchone()
+
+                if rating_data and rating_data[0] > 0:
+                    avg = round(rating_data[1] / rating_data[0], 1)
+                    display_name = f"{name} ⭐ ({avg})"
+                else:
+                    display_name = f"{name} ⭐ (0)"
+
+                restaurants.append(display_name)
+                restaurant_map[display_name] = name
+
+            restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
+            context.user_data["restaurant_map"] = restaurant_map
+
+            reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
+            await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
+            return SELECT_RESTAURANT
+
     except Exception as e:
-        logging.error(f"خطأ أثناء إرسال اسم المطعم إلى القناة: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء إرسال اسم المطعم. يرجى المحاولة لاحقاً.")
-
-    # إعادة عرض المطاعم
-    cursor.execute("SELECT id FROM cities WHERE name = ?", (city_name,))
-    city_id_row = cursor.fetchone()
-    if not city_id_row:
-        await update.message.reply_text("❌ لم يتم العثور على معرف المدينة.")
-        return await start(update, context)
-
-    city_id = city_id_row[0]
-
-    cursor.execute("SELECT name, is_frozen FROM restaurants WHERE city_id = ?", (city_id,))
-    rows = cursor.fetchall()
-
-    restaurants = []
-    restaurant_map = {}
-    for name, is_frozen in rows:
-        if is_frozen:
-            continue
-
-        cursor.execute("""
-            SELECT total_ratings, total_score FROM restaurant_ratings WHERE restaurant = ?
-        """, (name,))
-        rating_data = cursor.fetchone()
-
-        if rating_data and rating_data[0] > 0:
-            average_rating = round(rating_data[1] / rating_data[0], 1)
-            display_name = f"{name} ⭐ ({average_rating})"
-        else:
-            display_name = f"{name} ⭐ (0)"
-
-        restaurants.append(display_name)
-        restaurant_map[display_name] = name
-
-    restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
-    context.user_data['restaurant_map'] = restaurant_map
-
-    reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
-    await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
-    return SELECT_RESTAURANT
-
+        logger.exception(f"❌ خطأ في handle_missing_restaurant: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطاعم. حاول مجددًا لاحقًا.")
+        return SELECT_RESTAURANT
 
 
 
@@ -3406,17 +3423,23 @@ async def handle_report_based_cancellation(update: Update, context: CallbackCont
 
 
 async def reset_user_and_restart(user_id: int, context: ContextTypes.DEFAULT_TYPE):
-    cursor = db_conn.cursor()
-    cursor.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
-    db_conn.commit()
     try:
+        async with aiosqlite.connect("database.db") as db:
+            await db.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
+            await db.commit()
+
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ انتهت خدمتنا في منطقتك مؤقتًا.\nسنعود بأقرب وقت ممكن بإذن الله 🙏\nسنبدأ من جديد الآن."
+            text="❌ انتهت خدمتنا في منطقتك مؤقتًا.\n"
+                 "سنعود بأقرب وقت ممكن بإذن الله 🙏\n"
+                 "سنبدأ من جديد الآن."
         )
-        await start(update=None, context=context, user_id=user_id)  # تخصيص start لتقبل user_id
-    except:
-        pass
+
+        # تخصيص دالة start لتقبل user_id وحده
+        await start(update=None, context=context, user_id=user_id)
+
+    except Exception as e:
+        logger.exception(f"❌ خطأ أثناء تنفيذ reset_user_and_restart للمستخدم {user_id}: {e}")
 
 
 
