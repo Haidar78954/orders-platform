@@ -237,16 +237,15 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         user_id = update.effective_user.id
         message = update.message
         args = context.args if hasattr(context, "args") else []
-        args = [arg.strip() for arg in args if arg.strip()]
     else:
         message = None
         args = []
 
-    # ✅ تفريغ كل بيانات المستخدم عند كل /start
+    # ✅ تفريغ بيانات المستخدم عند كل /start
     context.user_data.clear()
     print("🚀 دالة start تعمل من النسخة الجديدة!")
-    
-    # ✅ حماية من إجراءات جارية (بقيت للاحتياط)
+
+    # ✅ حماية من إجراءات جارية
     if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
         if message:
             await message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمّه أو ألغِه قبل فتح عروض جديدة.")
@@ -259,9 +258,10 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         return ConversationHandler.END
     context.user_data["last_ad_click_time"] = now
 
-    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر صالح
-    if args and args[0]:
-        if args[0].startswith("go_"):
+    # ✅ فقط إذا دخل من go_ أو vip_ نتعامل كإعلان
+    if args:
+        first_arg = args[0].strip()
+        if first_arg.startswith("go_"):
             if message:
                 await message.reply_text(
                     "📢 *يالله عالسرييع 🔥*\n\n"
@@ -272,11 +272,9 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
                     parse_mode="Markdown"
                 )
             return ConversationHandler.END
-
-        elif args[0].startswith("vip_"):
+        elif first_arg.startswith("vip_"):
             return await handle_vip_start(update, context)
-
-        # ✅ تجاهل أي شيء آخر كأنه دخول عادي
+        # ✅ تجاهل باقي القيم دون إظهار رسالة خطأ
 
     # ✅ الدخول العادي
     reply_markup = ReplyKeyboardMarkup([
@@ -296,6 +294,7 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         await context.bot.send_message(chat_id=user_id, text=welcome_msg, reply_markup=reply_markup)
 
     return ASK_INFO
+
 
 
 async def ask_info_details(update: Update, context: CallbackContext) -> int:
