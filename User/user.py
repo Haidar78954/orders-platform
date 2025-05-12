@@ -7,6 +7,8 @@ import pytz
 from datetime import datetime
 from urllib.parse import unquote
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder
+
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -45,126 +47,123 @@ user_orders = {}
 
 
 
-# ✅ إنشاء جداول المحافظات والمدن أولًا
-#def setup_database():
-    #conn = sqlite3.connect("database.db")
-    #cursor = conn.cursor()
+async def initialize_database():
+    async with aiosqlite.connect("database.db") as db:
+        # جدول بيانات المستخدمين
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_data (
+                user_id INTEGER PRIMARY KEY,
+                name TEXT,
+                phone TEXT,
+                province TEXT,
+                city TEXT,
+                location_image TEXT,
+                location_text TEXT,
+                latitude REAL,
+                longitude REAL
+            )
+        """)
 
-    # جدول بيانات المستخدمين
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_data (
-            user_id INTEGER PRIMARY KEY,
-            name TEXT,
-            phone TEXT,
-            province TEXT,
-            city TEXT,
-            location_image TEXT,
-            location_text TEXT,
-            latitude REAL,
-            longitude REAL
-        )
-    """)
+        # جدول عداد الطلبات للمطاعم
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS restaurant_order_counter (
+                restaurant TEXT PRIMARY KEY,
+                last_order_number INTEGER
+            )
+        """)
 
-    # جدول عداد الطلبات للمطاعم
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS restaurant_order_counter (
-            restaurant TEXT PRIMARY KEY,
-            last_order_number INTEGER
-        )
-    """)
+        # جدول الطلبات
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_orders (
+                order_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                restaurant TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-    # جدول الطلبات
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_orders (
-            order_id TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            restaurant TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        # جدول تقييمات المطاعم
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS restaurant_ratings (
+                restaurant TEXT PRIMARY KEY,
+                total_ratings INTEGER DEFAULT 0,
+                total_score INTEGER DEFAULT 0
+            )
+        """)
 
-    # جدول تقييمات المطاعم
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS restaurant_ratings (
-            restaurant TEXT PRIMARY KEY,
-            total_ratings INTEGER DEFAULT 0,
-            total_score INTEGER DEFAULT 0
-        )
-    """)
+        # جدول المطاعم
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS restaurants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                city_id INTEGER NOT NULL,
+                channel TEXT NOT NULL,
+                open_hour REAL NOT NULL,
+                close_hour REAL NOT NULL,
+                is_frozen INTEGER DEFAULT 0,
+                FOREIGN KEY (city_id) REFERENCES cities(id)
+            )
+        """)
 
-    # ✅ جدول المطاعم (مطابق لبوت الإدارة)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS restaurants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            city_id INTEGER NOT NULL,
-            channel TEXT NOT NULL,
-            open_hour REAL NOT NULL,
-            close_hour REAL NOT NULL,
-            is_frozen INTEGER DEFAULT 0,
-            FOREIGN KEY (city_id) REFERENCES cities(id)
-        )
-    """)
+        # جدول الإعلانات
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS advertisements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                region_type TEXT NOT NULL,
+                region_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
-    # ✅ جدول الإعلانات
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS advertisements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            content TEXT NOT NULL,
-            region_type TEXT NOT NULL,
-            region_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        # جدول الفئات
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                restaurant_id INTEGER NOT NULL,
+                FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+            )
+        """)
 
-    conn.commit()
-    return conn
+        # جدول المدن
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS cities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                province_id INTEGER NOT NULL,
+                ads_channel TEXT,
+                FOREIGN KEY (province_id) REFERENCES provinces(id)
+            )
+        """)
 
+        # جدول المحافظات
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS provinces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL
+            )
+        """)
 
-def setup_menu_tables():
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
+        # جدول الوجبات
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS meals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price INTEGER,
+                category_id INTEGER NOT NULL,
+                caption TEXT,
+                image_file_id TEXT,
+                size_options TEXT,
+                unique_id TEXT UNIQUE,
+                image_message_id INTEGER,
+                UNIQUE(name, category_id),
+                FOREIGN KEY (category_id) REFERENCES categories(id)
+            )
+        """)
 
-    # جدول الفئات والمطاعم كما في السابق...
-
-    # جدول الوجبات
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS meals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            price INTEGER,
-            category_id INTEGER NOT NULL,
-            caption TEXT,
-            image_file_id TEXT,
-            size_options TEXT,
-            unique_id TEXT UNIQUE,
-            image_message_id INTEGER,
-            UNIQUE(name, category_id),
-            FOREIGN KEY (category_id) REFERENCES categories(id)
-        )
-    """)
-
-    # ✅ تحقق من وجود الأعمدة
-    cursor.execute("PRAGMA table_info(meals)")
-    meal_columns = [col[1] for col in cursor.fetchall()]
-    if "caption" not in meal_columns:
-        cursor.execute("ALTER TABLE meals ADD COLUMN caption TEXT")
-    if "image_file_id" not in meal_columns:
-        cursor.execute("ALTER TABLE meals ADD COLUMN image_file_id TEXT")
-    if "size_options" not in meal_columns:
-        cursor.execute("ALTER TABLE meals ADD COLUMN size_options TEXT")
-    if "unique_id" not in meal_columns:
-        cursor.execute("ALTER TABLE meals ADD COLUMN unique_id TEXT UNIQUE")
-    if "image_message_id" not in meal_columns:
-        cursor.execute("ALTER TABLE meals ADD COLUMN image_message_id INTEGER")
-
-    conn.commit()
-    conn.close()
-
-#db_conn = setup_database()
-setup_menu_tables()
-
-
+        # تنفيذ كافة الإنشاءات
+        await db.commit()
 
 ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, ASK_LOCATION_TEXT, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_RATING, ASK_RATING_COMMENT, ASK_REPORT_REASON   = range(25)
 
@@ -3042,8 +3041,6 @@ async def handle_back_and_wait(update: Update, context: CallbackContext) -> int:
     return MAIN_MENU
 
 
-import asyncio
-
 async def ask_remaining_time(update: Update, context: CallbackContext) -> int:
     """إرسال طلب إلى قناة المطعم لمعرفة مدة تحضير الطلب."""
     user_id = update.effective_user.id
@@ -3728,48 +3725,50 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", start)]
 )
-def run_user_bot():
-    application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
+
+async def run_user_bot():
+    application = Application.builder().token("YOUR_BOT_TOKEN").build()
 
     # إضافة معالج المحادثة
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
 
-    # التفاعل مع رسائل القناة (للتحديثات من المطعم)
+    # التعامل مع رسائل القناة
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
     ))
-
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"تم رفض الطلب.*معرف الطلب"),
         handle_order_rejection_notice
     ))
-
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.TEXT,
         handle_cashier_interaction
     ))
 
+    # دعم إعلانات VIP
     application.add_handler(CommandHandler("start", handle_vip_start))
-
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\d+_\d+"),
         handle_vip_broadcast_message
     ))
-
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
 
+    # جدولة المهام اليومية
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
-    # إضافة معالج الأخطاء
+    # تهيئة قاعدة البيانات
+    await initialize_database()
+
+    # معالج الأخطاء
     application.add_error_handler(error_handler)
 
+    # تشغيل البوت
     application.run_polling()
 
 
-
 if __name__ == "__main__":
-     run_user_bot()
+    asyncio.run(run_user_bot())
