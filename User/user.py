@@ -3726,14 +3726,13 @@ conv_handler = ConversationHandler(
     fallbacks=[CommandHandler("cancel", start)]
 )
 
-async def run_user_bot():
-    application = Application.builder().token("YOUR_BOT_TOKEN").build()
+def run_user_bot():
+    application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
-    # إضافة معالج المحادثة
+    # إضافة معالجات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
 
-    # التعامل مع رسائل القناة
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
@@ -3747,28 +3746,24 @@ async def run_user_bot():
         handle_cashier_interaction
     ))
 
-    # دعم إعلانات VIP
     application.add_handler(CommandHandler("start", handle_vip_start))
     application.add_handler(MessageHandler(
-        filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\d+_\d+"),
+        filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
         handle_vip_broadcast_message
     ))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
 
-    # جدولة المهام اليومية
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
-    # تهيئة قاعدة البيانات
-    await initialize_database()
-
-    # معالج الأخطاء
     application.add_error_handler(error_handler)
 
-    # تشغيل البوت
+    # ✅ الآن هذا السطر آمن
     application.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(run_user_bot())
+    import asyncio
+    asyncio.run(initialize_database())  # ← هذا فقط async
+    run_user_bot()  # ← دالة sync لا تحتاج asyncio.run()
