@@ -3625,7 +3625,7 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
+    entry_points=[CommandHandler("start", handle_ad_start)],
     states={
         ASK_INFO: [
             MessageHandler(filters.Regex("^تفاصيل عن الأسئلة وما الغاية منها$"), ask_info_details),
@@ -3645,9 +3645,7 @@ conv_handler = ConversationHandler(
         ],
         ASK_PROVINCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_province)],
         ASK_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_city)],
-        ASK_CUSTOM_CITY: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_city)
-        ],
+        ASK_CUSTOM_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_city)],
         ASK_LOCATION_IMAGE: [
             MessageHandler(filters.LOCATION, handle_location),
             MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
@@ -3745,6 +3743,7 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", start)]
 )
+
 async def run_user_bot():
     application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
 
