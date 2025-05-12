@@ -3723,13 +3723,16 @@ conv_handler = ConversationHandler(
     },
     fallbacks=[CommandHandler("cancel", start)]
 )
-
 async def run_user_bot():
-    application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
+    application = Application.builder().token("YOUR_TOKEN_HERE").build()
 
-    # إضافة المعالجات
+    # ✅ يجب أن يكون أول هاندلر
+    application.add_handler(CommandHandler("start", start))
+
+    # باقي الهاندلرات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("testimage", test_copy_image))
+
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
@@ -3742,7 +3745,7 @@ async def run_user_bot():
         filters.ChatType.CHANNEL & filters.TEXT,
         handle_cashier_interaction
     ))
-    application.add_handler(CommandHandler("start", start))
+
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
         handle_vip_broadcast_message
@@ -3757,10 +3760,10 @@ async def run_user_bot():
 
     await initialize_database()
 
-    # ✅ حلقة تشغيل مستقلة وآمنة
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
+
 
 
 
