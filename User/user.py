@@ -231,30 +231,29 @@ def get_main_menu():
 # الوظائف
 from urllib.parse import unquote
 async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None, user_id: int = None) -> int:
-    # ✅ دعم استدعاء start بدون update (عند reset_user_and_restart)
     if update:
         user_id = update.effective_user.id
         message = update.message
-        args = context.args if hasattr(context, "args") else []
+        args = [arg for arg in context.args if arg.strip()] if hasattr(context, "args") else []
     else:
         message = None
         args = []
 
-    # ✅ حماية من إجراءات جارية (تذكير أو إلغاء)
+    # ✅ حماية من إجراءات جارية
     if context.user_data.get("pending_action") in ["awaiting_reminder_confirm", "awaiting_cancel_confirm"]:
         if message:
             await message.reply_text("🚫 لديك إجراء جارٍ قيد التنفيذ. أتمّه أو ألغِه قبل فتح عروض جديدة.")
         return ConversationHandler.END
 
-    # ✅ حماية من الضغط المتكرر (تحقق بالزمن بدلاً من asyncio.sleep)
+    # ✅ حماية من الضغط المتكرر
     now = datetime.now()
     last_click = context.user_data.get("last_ad_click_time")
     if last_click and (now - last_click).total_seconds() < 2:
         return ConversationHandler.END
     context.user_data["last_ad_click_time"] = now
 
-    # ✅ التعامل مع الإعلانات
-    if args and len(args) > 0:
+    # ✅ التعامل مع الإعلانات فقط إذا كان باراميتر حقيقي
+    if args:
         if args[0].startswith("go_"):
             if message:
                 await message.reply_text(
@@ -271,7 +270,6 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
             return await handle_vip_start(update, context)
 
         else:
-            # ✅ حالة رابط غير معروف
             if message:
                 await message.reply_text("❌ رابط الإعلان غير صالح.")
             return ConversationHandler.END
@@ -282,26 +280,18 @@ async def start(update: Update = None, context: ContextTypes.DEFAULT_TYPE = None
         ["املأ بياناتي"]
     ], resize_keyboard=True)
 
+    welcome_msg = (
+        "أهلاً وسهلاً 🌹\n"
+        "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
+        "غايتنا نخدمك بأفضل طريقة 👌"
+    )
+
     if message:
-        await message.reply_text(
-            "أهلاً وسهلاً 🌹\n"
-            "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-            "غايتنا نخدمك بأفضل طريقة 👌",
-            reply_markup=reply_markup
-        )
+        await message.reply_text(welcome_msg, reply_markup=reply_markup)
     else:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=(
-                "أهلاً وسهلاً 🌹\n"
-                "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-                "غايتنا نخدمك بأفضل طريقة 👌"
-            ),
-            reply_markup=reply_markup
-        )
+        await context.bot.send_message(chat_id=user_id, text=welcome_msg, reply_markup=reply_markup)
 
     return ASK_INFO
-
 
 
 async def ask_info_details(update: Update, context: CallbackContext) -> int:
