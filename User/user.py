@@ -221,8 +221,6 @@ def get_fast_order_cooldown(cancel_times: list) -> tuple[int, str]:
 def generate_order_id():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=15))  # 15 حرف ورقم عشوائي
 
-# عند تأكيد الطلب، قم بإنشاء معرف الطلب مرة واحدة فقط
-order_id = generate_order_id()
 
 def get_main_menu():
     return ReplyKeyboardMarkup([
