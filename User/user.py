@@ -46,9 +46,9 @@ user_orders = {}
 
 
 # ✅ إنشاء جداول المحافظات والمدن أولًا
-def setup_database():
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
+#def setup_database():
+    #conn = sqlite3.connect("database.db")
+    #cursor = conn.cursor()
 
     # جدول بيانات المستخدمين
     cursor.execute("""
@@ -161,7 +161,7 @@ def setup_menu_tables():
     conn.commit()
     conn.close()
 
-db_conn = setup_database()
+#db_conn = setup_database()
 setup_menu_tables()
 
 
