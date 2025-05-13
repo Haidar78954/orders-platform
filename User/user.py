@@ -4,6 +4,7 @@ import random
 import re
 import string
 import pytz
+import os
 from datetime import datetime
 from urllib.parse import unquote
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -47,123 +48,117 @@ user_orders = {}
 print("✅ بدأ تشغيل user.py فعليًا")  # ← هذا هو مكانه المثالي
 
 
-async def initialize_database():
-    async with aiosqlite.connect("database.db") as db:
-        # جدول بيانات المستخدمين
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_data (
-                user_id INTEGER PRIMARY KEY,
-                name TEXT,
-                phone TEXT,
-                province TEXT,
-                city TEXT,
-                location_image TEXT,
-                location_text TEXT,
-                latitude REAL,
-                longitude REAL
-            )
-        """)
+def initialize_database():
+    import sqlite3
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
 
-        # جدول عداد الطلبات للمطاعم
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS restaurant_order_counter (
-                restaurant TEXT PRIMARY KEY,
-                last_order_number INTEGER
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_data (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            phone TEXT,
+            province TEXT,
+            city TEXT,
+            location_image TEXT,
+            location_text TEXT,
+            latitude REAL,
+            longitude REAL
+        )
+    """)
 
-        # جدول الطلبات
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_orders (
-                order_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                restaurant TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS restaurant_order_counter (
+            restaurant TEXT PRIMARY KEY,
+            last_order_number INTEGER
+        )
+    """)
 
-        # جدول تقييمات المطاعم
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS restaurant_ratings (
-                restaurant TEXT PRIMARY KEY,
-                total_ratings INTEGER DEFAULT 0,
-                total_score INTEGER DEFAULT 0
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_orders (
+            order_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            restaurant TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
-        # جدول المطاعم
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS restaurants (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                city_id INTEGER NOT NULL,
-                channel TEXT NOT NULL,
-                open_hour REAL NOT NULL,
-                close_hour REAL NOT NULL,
-                is_frozen INTEGER DEFAULT 0,
-                FOREIGN KEY (city_id) REFERENCES cities(id)
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS restaurant_ratings (
+            restaurant TEXT PRIMARY KEY,
+            total_ratings INTEGER DEFAULT 0,
+            total_score INTEGER DEFAULT 0
+        )
+    """)
 
-        # جدول الإعلانات
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS advertisements (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT NOT NULL,
-                region_type TEXT NOT NULL,
-                region_name TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS restaurants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            city_id INTEGER NOT NULL,
+            channel TEXT NOT NULL,
+            open_hour REAL NOT NULL,
+            close_hour REAL NOT NULL,
+            is_frozen INTEGER DEFAULT 0,
+            FOREIGN KEY (city_id) REFERENCES cities(id)
+        )
+    """)
 
-        # جدول الفئات
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                restaurant_id INTEGER NOT NULL,
-                FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS advertisements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            region_type TEXT NOT NULL,
+            region_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
-        # جدول المدن
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS cities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                province_id INTEGER NOT NULL,
-                ads_channel TEXT,
-                FOREIGN KEY (province_id) REFERENCES provinces(id)
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            restaurant_id INTEGER NOT NULL,
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+        )
+    """)
 
-        # جدول المحافظات
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS provinces (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            province_id INTEGER NOT NULL,
+            ads_channel TEXT,
+            FOREIGN KEY (province_id) REFERENCES provinces(id)
+        )
+    """)
 
-        # جدول الوجبات
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS meals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                price INTEGER,
-                category_id INTEGER NOT NULL,
-                caption TEXT,
-                image_file_id TEXT,
-                size_options TEXT,
-                unique_id TEXT UNIQUE,
-                image_message_id INTEGER,
-                UNIQUE(name, category_id),
-                FOREIGN KEY (category_id) REFERENCES categories(id)
-            )
-        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS provinces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    """)
 
-        # تنفيذ كافة الإنشاءات
-        await db.commit()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS meals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            price INTEGER,
+            category_id INTEGER NOT NULL,
+            caption TEXT,
+            image_file_id TEXT,
+            size_options TEXT,
+            unique_id TEXT UNIQUE,
+            image_message_id INTEGER,
+            UNIQUE(name, category_id),
+            FOREIGN KEY (category_id) REFERENCES categories(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
 
 ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, ASK_LOCATION_TEXT, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_RATING, ASK_RATING_COMMENT, ASK_REPORT_REASON   = range(25)
 
@@ -233,18 +228,15 @@ from urllib.parse import unquote
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print(f"✅ تم استقبال /start من المستخدم: {update.effective_user.id} (via normal start logic)")
     user_id = update.effective_user.id
     message = update.message
-
-    # تفريغ السياق القديم
     context.user_data.clear()
-    print("🚀 دخل المستخدم بشكل عادي إلى /start")
-
+    print("🚀 دخل المستخدم بشكل عادي إلى /start (via normal start logic)")
     reply_markup = ReplyKeyboardMarkup([
         ["تفاصيل عن الأسئلة وما الغاية منها"],
         ["املأ بياناتي"]
     ], resize_keyboard=True)
-
     await message.reply_text(
         "أهلاً وسهلاً 🌹\n"
         "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
@@ -252,6 +244,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         reply_markup=reply_markup
     )
     return ASK_INFO
+
 
 
 
@@ -1239,7 +1232,7 @@ async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         logger.error(f"❌ Database error in show_restaurant_categories: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء جلب الفئات. حاول مرة أخرى لاحقاً.")
-        
+
 
 
 async def has_active_order(user_id: int) -> bool:
@@ -3557,70 +3550,98 @@ def reset_order_counters():
     db_conn.commit()
     print("✅ تم تصفير عدادات الطلبات لجميع المطاعم.")
 
+
+
 async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     message = update.message
 
-    if not message.text.startswith("/start "):
-        return ConversationHandler.END
+    # التحقق إذا كان الأمر /start يحتوي على وسائط (بارامترات إعلانية)
+    if message and message.text and message.text.startswith("/start "): # لاحظ المسافة
+        arg = message.text.split("/start ", 1)[1].strip()
+        print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
 
-    arg = message.text.split("/start ", 1)[1].strip()
+        # --- بداية منطق معالجة الإعلانات الموجود لديك --- 
+        # (مثل التحقق من last_ad_click_time، ومعالجة go_ و vip_)
+        now = datetime.now()
+        last_click = context.user_data.get("last_ad_click_time")
+        if last_click and (now - last_click).total_seconds() < 2:
+            return ConversationHandler.END # أو أي معالجة أخرى للضغط المتكرر
+        context.user_data["last_ad_click_time"] = now
 
-    # ✅ حماية من الضغط المتكرر
-    now = datetime.now()
-    last_click = context.user_data.get("last_ad_click_time")
-    if last_click and (now - last_click).total_seconds() < 2:
-        return ConversationHandler.END
-    context.user_data["last_ad_click_time"] = now
+        if arg.startswith("go_"):
+            await message.reply_text(
+                "📢 *يالله عالسرييع 🔥*\n\n"
+                "وصلت من إعلان، لتكمل:\n"
+                "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
+                "➤ ثم اختر المطعم اللي شفته\n\n"
+                "👇 وبلّش شوف العروض 👇",
+                parse_mode="Markdown"
+            )
+            return ConversationHandler.END # هذا الإعلان يرسل رسالة وينتهي
 
-    # ✅ إعلان عادي
-    if arg.startswith("go_"):
-        await message.reply_text(
-            "📢 *يالله عالسرييع 🔥*\n\n"
-            "وصلت من إعلان، لتكمل:\n"
-            "➤ اضغط على زر *اطلب عالسريع 🔥* في الأسفل\n"
-            "➤ ثم اختر المطعم اللي شفته\n\n"
-            "👇 وبلّش شوف العروض 👇",
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END
+        elif arg.startswith("vip_"):
+            try:
+                # تأكد أن هذا التقسيم صحيح بناءً على شكل بارامترات vip لديك
+                # مثلاً: vip_cityID_restaurantID
+                _, city_id_str, restaurant_id_str = arg.split("_", 2) 
+                city_id = int(city_id_str)
+                # restaurant_id = int(restaurant_id_str) # إذا كنت تحتاجه
 
-    # ✅ إعلان VIP
-    elif arg.startswith("vip_"):
-        try:
-            _, city_id_str, restaurant_id_str = arg.split("_")
-            city_id = int(city_id_str)
+                async with aiosqlite.connect("database.db") as db:
+                    async with db.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                        row = await cursor.fetchone()
 
-            # ✅ جلب المدينة الحالية للمستخدم من قاعدة البيانات
-            async with aiosqlite.connect("database.db") as db:
-                async with db.execute("SELECT city FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
-                    row = await cursor.fetchone()
+                if not row:
+                    await message.reply_text("❌ لم نجد بياناتك. يرجى التسجيل أولاً بالضغط على /start بدون إضافات.")
+                    return ConversationHandler.END
 
-            if not row:
-                await message.reply_text("❌ لم نجد بياناتك. يرجى التسجيل أولاً.")
+                user_city_name = row[0]
+                async with aiosqlite.connect("database.db") as db:
+                    async with db.execute("SELECT id FROM cities WHERE name = ?", (user_city_name,)) as cursor:
+                        city_row = await cursor.fetchone()
+
+                if not city_row or city_row[0] != city_id:
+                    await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
+                    return ConversationHandler.END
+
+                # إذا نجحت كل التحققات، يمكنك هنا توجيه المستخدم إلى تدفق إعلان VIP
+                # قد تحتاج إلى حالة جديدة في ConversationHandler لهذا التدفق
+                # context.user_data['vip_restaurant_id'] = restaurant_id_str 
+                await message.reply_text(f"تم التحقق من إعلان VIP لمدينة {city_id}. (هنا يبدأ تدفق الإعلان الخاص بك)")
+                # return VIP_AD_FLOW_STATE # مثال: حالة جديدة لتدفق إعلان VIP
+                return ConversationHandler.END # حاليًا سينهي المحادثة، قم بتعديلها حسب حاجتك
+
+            except ValueError:
+                print(f"❌ خطأ في تحليل باراميتر إعلان VIP: {arg}")
+                await message.reply_text("❌ رابط إعلان VIP غير صالح.")
                 return ConversationHandler.END
-
-            user_city_name = row[0]
-
-            # ✅ التحقق من معرف المدينة
-            async with aiosqlite.connect("database.db") as db:
-                async with db.execute("SELECT id FROM cities WHERE name = ?", (user_city_name,)) as cursor:
-                    city_row = await cursor.fetchone()
-
-            if not city_row or city_row[0] != city_id:
-                await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
+            except Exception as e:
+                print(f"❌ خطأ في معالجة إعلان VIP: {e}")
+                await message.reply_text("❌ حدث خطأ أثناء معالجة الإعلان.")
                 return ConversationHandler.END
-
-            # ✅ السماح بإكمال الإعلان
-            return await handle_vip_start(update, context)
-
-        except Exception as e:
-            print(f"❌ خطأ في تحليل باراميتر الإعلان: {e}")
-            await message.reply_text("❌ الرابط غير صالح.")
+        else:
+            # وسائط غير معروفة مع /start
+            await message.reply_text("⚠️ أمر البدء هذا غير صالح.")
             return ConversationHandler.END
+        # --- نهاية منطق معالجة الإعلانات --- 
 
-    # 🔕 غير إعلان صالح
-    return ConversationHandler.END
+    else:
+        # هذا هو أمر /start العادي (بدون وسائط بعد "/start")
+        print(f"handle_ad_start: Plain /start detected for user {user_id}. Calling normal start registration.")
+        # استدعاء دالة بدء التسجيل العادية
+        return await start(update, context) # 'start' هي دالة الترحيب والتسجيل الأصلية
+
+
+#async def unified_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message and update.message.text:
+        text = update.message.text.strip()
+        if text.startswith("/start go_") or text.startswith("/start vip_"):
+            return await handle_ad_start(update, context)
+
+    # 🟢 إذا لم يكن إعلان، ابدأ التسجيل مباشرة
+    return await start(update, context)  # يجب أن تعالج الوضع وتُتابع الحوار بنفسها دون اعتماد على ConversationHandler
+
 
 
 
@@ -3741,20 +3762,16 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rating_comment)
         ]
     },
-    fallbacks=[CommandHandler("cancel", start)]
+     fallbacks=[CommandHandler("cancel", start)]
 )
 
-async def run_user_bot():
-    application = Application.builder().token("7675280742:AAF0aN8HjibzwtUKXaUoY1tg1FLS9cCIjEw").build()
+def run_user_bot():
+    application = Application.builder().token("7656173309:AAEy3qkVc1yFr-N3kfbawTARwlgWShBZOl8").build()
 
-    # ✅ يجب أن يكون أول هاندلر
-    application.add_handler(CommandHandler("start", handle_ad_start))
-
-
-    # باقي الهاندلرات
+    # المعالجات
     application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("testimage", test_copy_image))
-
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
@@ -3767,28 +3784,26 @@ async def run_user_bot():
         filters.ChatType.CHANNEL & filters.TEXT,
         handle_cashier_interaction
     ))
-
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
         handle_vip_broadcast_message
     ))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
+    
+    # الأخطاء
+    application.add_error_handler(error_handler)
 
+    # قاعدة البيانات إن وُجدت
+    initialize_database()  # إذا كانت غير async
+
+    # المهام المجدولة
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
 
-    application.add_error_handler(error_handler)
-
-    await initialize_database()
-
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-
-
-
-
+    # تشغيل البوت
+    print("✅ تشغيل البوت باستخدام .run_polling() التقليدي")
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(run_user_bot())
+    run_user_bot()
