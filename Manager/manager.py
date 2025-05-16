@@ -429,7 +429,7 @@ async def handle_province_action(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["province_action"] = "delete"
 
         elif action == "edit_province_name":
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
                 async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
                     provinces = [row[0] async for row in cursor]
 
@@ -461,7 +461,7 @@ async def handle_province_name(update: Update, context: ContextTypes.DEFAULT_TYP
         province_name = update.message.text.strip()
         action = context.user_data.get("province_action")
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             cursor = await conn.cursor()
 
             if action == "add":
@@ -497,7 +497,6 @@ async def handle_province_name(update: Update, context: ContextTypes.DEFAULT_TYP
 
                 await cursor.execute("DELETE FROM cities WHERE province_id = ?", (province_id,))
                 await cursor.execute("DELETE FROM provinces WHERE id = ?", (province_id,))
-
                 await cursor.execute("SELECT user_id FROM user_data WHERE province = ?", (province_name,))
                 users = [row[0] async for row in cursor]
 
@@ -563,7 +562,7 @@ async def manage_cities(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
                 provinces = [row[0] async for row in cursor]
 
@@ -584,7 +583,6 @@ async def manage_cities(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"خطأ في manage_cities: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء عرض المحافظات.")
-
 
 
 
@@ -636,7 +634,7 @@ async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.edit_message_text("⚠️ لم يتم تحديد المحافظة.")
                 return
 
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
                 async with conn.execute("""
                     SELECT c.name FROM cities c
                     JOIN provinces p ON c.province_id = p.id
@@ -665,7 +663,7 @@ async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.edit_message_text("⚠️ لم يتم تحديد المحافظة.")
                 return
 
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
                 async with conn.execute("""
                     SELECT c.name FROM cities c
                     JOIN provinces p ON c.province_id = p.id
@@ -691,6 +689,8 @@ async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logging.error(f"خطأ في handle_city_action: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء إدارة المدن.")
+
+
 
 async def handle_rename_city_old(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -720,7 +720,7 @@ async def handle_city_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ لم يتم تحديد المحافظة. يرجى العودة واختيار المحافظة أولًا.")
             return
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             cursor = await conn.execute("SELECT id FROM provinces WHERE name = ?", (province,))
             result = await cursor.fetchone()
             if not result:
@@ -831,7 +831,7 @@ async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DE
             await update.message.reply_text("⚠️ يجب أن يبدأ معرف القناة بـ @ أو اكتب 'لا يوجد'.")
             return
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             await conn.execute("UPDATE cities SET ads_channel = ? WHERE name = ?", (new_channel, city))
             await conn.commit()
 
@@ -845,13 +845,12 @@ async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DE
         await update.message.reply_text("❌ حدث خطأ أثناء تعديل القناة.")
 
 
-
 async def handle_send_city_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             async with conn.execute("SELECT id, name FROM cities ORDER BY name") as cursor:
                 cities = await cursor.fetchall()
 
@@ -884,7 +883,7 @@ async def handle_ad_all_cities_selected(update: Update, context: ContextTypes.DE
         context.user_data["ad_all_cities"] = True
         context.user_data["ad_step"] = "awaiting_ad_restaurant_for_all"
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             async with conn.execute("SELECT id, name FROM restaurants ORDER BY name") as cursor:
                 restaurants = await cursor.fetchall()
 
@@ -922,7 +921,7 @@ async def handle_ad_city_selected(update: Update, context: ContextTypes.DEFAULT_
             city_id = int(city_id_raw)
             context.user_data["ad_city_id"] = city_id
 
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
                 async with conn.execute("SELECT name FROM cities WHERE id = ?", (city_id,)) as cursor:
                     row = await cursor.fetchone()
 
@@ -978,7 +977,7 @@ async def handle_ad_restaurant_selected(update: Update, context: ContextTypes.DE
         restaurant_id = int(query.data.replace("ad_restaurant_", ""))
         context.user_data["ad_restaurant_id"] = restaurant_id
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
             async with conn.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,)) as cursor:
                 row = await cursor.fetchone()
 
@@ -995,6 +994,7 @@ async def handle_ad_restaurant_selected(update: Update, context: ContextTypes.DE
     except Exception as e:
         logging.error(f"خطأ في handle_ad_restaurant_selected: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحديد المطعم.")
+
 
 async def handle_ad_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -1035,7 +1035,8 @@ async def manage_restaurants(update: Update, context: ContextTypes.DEFAULT_TYPE)
         query = update.callback_query
         await query.answer()
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
                 provinces = [row[0] async for row in cursor]
 
@@ -1063,7 +1064,8 @@ async def handle_province_for_restaurant(update: Update, context: ContextTypes.D
         province = query.data.split("select_province_for_restaurant_")[1]
         context.user_data["selected_province_restaurant"] = province
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             async with conn.execute("""
                 SELECT cities.name FROM cities
                 JOIN provinces ON cities.province_id = provinces.id
@@ -1127,7 +1129,8 @@ async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text("⚠️ لم يتم تحديد المدينة.")
             return
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             async with conn.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
                 result = await cursor.fetchone()
                 if not result:
@@ -1166,7 +1169,8 @@ async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text("⚠️ لم يتم تحديد المدينة.")
             return
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             async with conn.execute("""
                 SELECT r.name FROM restaurants r
                 JOIN cities c ON r.city_id = c.id
@@ -1213,7 +1217,8 @@ async def confirm_delete_restaurant(update: Update, context: ContextTypes.DEFAUL
 
         restaurant_name = query.data.split("confirm_delete_restaurant_")[1]
 
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             await conn.execute("""
                 DELETE FROM meals WHERE category_id IN (
                     SELECT id FROM categories WHERE restaurant_id = (
@@ -1334,7 +1339,8 @@ async def handle_restaurant_name(update: Update, context: ContextTypes.DEFAULT_T
             return "ASK_CHANNEL"
 
         elif action == "delete_restaurant":
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("DELETE FROM restaurants WHERE name = ?", (name,))
                 await conn.execute("DELETE FROM restaurant_ratings WHERE restaurant = ?", (name,))
                 await conn.commit()
@@ -1399,7 +1405,8 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     try:
-        async with await get_db_connection() as conn:
+        async with get_db_connection() as conn:
+
             async with conn.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
                 result = await cursor.fetchone()
 
@@ -1444,7 +1451,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("UPDATE cities SET ads_channel = ? WHERE name = ?", (new_channel, city))
                 await conn.commit()
         except Exception as e:
@@ -1544,7 +1552,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant_name = context.user_data.get("selected_restaurant_meal")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     UPDATE meals SET name = ?
                     WHERE name = ? AND category_id = (
@@ -1582,7 +1591,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 if not step or step == "single_price":
                     new_price = int(text)
                     await conn.execute("""
@@ -1663,7 +1673,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         meal_id = context.user_data["meal_to_edit_caption_id"]
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("UPDATE meals SET caption = ? WHERE id = ?", (new_caption, meal_id))
                 await conn.commit()
             await update.message.reply_text("✅ تم تعديل وصف الوجبة بنجاح.")
@@ -1688,7 +1699,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             restaurant_name = context.user_data.get("selected_restaurant_meal")
 
             try:
-                async with await get_db_connection() as conn:
+                async with get_db_connection() as conn:
+
                     async with conn.execute("""
                         SELECT size_options FROM meals
                         WHERE name = ? AND category_id = (
@@ -1739,7 +1751,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant_name = context.user_data.get("selected_restaurant_meal")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     UPDATE meals SET size_options = ?, price = ?
                     WHERE name = ? AND category_id = (
@@ -1782,7 +1795,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant_name = context.user_data.get("selected_restaurant_meal")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 async with conn.execute("""
                     SELECT size_options FROM meals
                     WHERE name = ? AND category_id = (
@@ -1835,7 +1849,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             category = context.user_data.get("selected_category_meal")
             restaurant = context.user_data.get("selected_restaurant_meal")
 
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     UPDATE meals SET size_options = ?, price = ?
                     WHERE name = ? AND category_id = (
@@ -1870,7 +1885,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 async with conn.execute("SELECT id FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
                     result = await cursor.fetchone()
 
@@ -1902,7 +1918,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant_name = context.user_data.get("selected_restaurant_category")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     DELETE FROM categories
                     WHERE name = ? AND restaurant_id = (
@@ -1932,7 +1949,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant_name = context.user_data.get("selected_restaurant_category")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     UPDATE categories SET name = ?
                     WHERE name = ? AND restaurant_id = (
@@ -1957,7 +1975,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         old_name = context.user_data["old_restaurant_name"]
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("UPDATE restaurants SET name = ? WHERE name = ?", (new_name, old_name))
                 await conn.execute("UPDATE restaurant_ratings SET restaurant = ? WHERE restaurant = ?", (new_name, old_name))
                 await conn.execute("UPDATE user_orders SET restaurant = ? WHERE restaurant = ?", (new_name, old_name))
@@ -1979,7 +1998,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         old_name = context.user_data.get("selected_restaurant_to_edit")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("UPDATE restaurants SET name = ? WHERE name = ?", (new_name, old_name))
                 await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم المطعم إلى: {new_name}")
@@ -1999,7 +2019,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         restaurant = context.user_data.get("selected_restaurant_to_edit")
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("UPDATE restaurants SET channel = ? WHERE name = ?", (new_channel, restaurant))
                 await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل معرف القناة إلى: {new_channel}")
@@ -2038,7 +2059,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         restaurant = context.user_data.get("selected_restaurant_to_edit")
 
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 await conn.execute("""
                     UPDATE restaurants SET open_hour = ?, close_hour = ?
                     WHERE name = ?
@@ -2123,7 +2145,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # إرسال إلى القنوات
         try:
-            async with await get_db_connection() as conn:
+            async with get_db_connection() as conn:
+
                 if ad_city == "all":
                     async with conn.execute("SELECT ads_channel FROM cities WHERE ads_channel IS NOT NULL") as cursor:
                         channels = [row[0] async for row in cursor]
@@ -2167,7 +2190,8 @@ async def manage_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    async with await get_db_connection() as conn:
+    async with get_db_connection() as conn:
+
         async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
             provinces = [row[0] async for row in cursor]
 
@@ -2192,7 +2216,8 @@ async def handle_province_for_category(update: Update, context: ContextTypes.DEF
     province = query.data.split("select_province_for_category_")[1]
     context.user_data["selected_province_category"] = province
 
-    async with await get_db_connection() as conn:
+    async with get_db_connection() as conn:
+
         async with conn.execute("""
             SELECT cities.name FROM cities
             JOIN provinces ON cities.province_id = provinces.id
@@ -2222,7 +2247,8 @@ async def handle_city_for_category(update: Update, context: ContextTypes.DEFAULT
     city = query.data.split("select_city_for_category_")[1]
     context.user_data["selected_city_category"] = city
 
-    async with await get_db_connection() as conn:
+    async with get_db_connection() as conn:
+
         async with conn.execute("""
             SELECT r.name FROM restaurants r
             JOIN cities c ON r.city_id = c.id
