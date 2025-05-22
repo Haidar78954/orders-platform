@@ -4919,7 +4919,7 @@ async def run_admin_bot():
     app.add_handler(CallbackQueryHandler(handle_export_users, pattern="^export_users$"))
     app.add_handler(CallbackQueryHandler(handle_export_orders, pattern="^export_orders$"))
 
-    app.add_handler(CallbackQueryHandler(handle_delete_restaurant, pattern="^delete_restaurant$"))
+    
     app.add_handler(CallbackQueryHandler(handle_ad_province, pattern=r"^ad_select_province_"))
     app.add_handler(CallbackQueryHandler(handle_send_city_ad, pattern="^send_city_ad$"))
     app.add_handler(CallbackQueryHandler(handle_ad_city_selection, pattern=r"^ad_select_city_"))
