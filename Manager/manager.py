@@ -4812,7 +4812,7 @@ async def run_admin_bot():
     app.add_handler(CallbackQueryHandler(handle_selected_restaurant_edit, pattern="^select_restaurant_edit_target_"))
 
     app.add_handler(CallbackQueryHandler(handle_blacklist_menu, pattern="^go_blacklist_menu$"))
-    app.add_handler(CallbackQueryHandler(handle_blacklist_actions, pattern="^(add_blacklisted_number|remove_blacklisted_number)$"))
+    app.add_handler(CallbackQueryHandler(handle_blacklist_action, pattern="^(add_blacklisted_number|remove_blacklisted_number)$"))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^📵 الأرقام المحظورة$"), handle_blacklist_menu))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^➕ إضافة رقم محظور$"), handle_add_blacklist))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^➖ فك حظر رقم$"), handle_remove_blacklist))
