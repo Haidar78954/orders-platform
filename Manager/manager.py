@@ -4,8 +4,10 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.ext import MessageHandler, filters
 import logging
+import pymysql
+import aiomysql
+from contextlib import asynccontextmanager
 import asyncio
-import aiosqlite
 import json
 from urllib.parse import quote
 from telegram import InputMediaPhoto
@@ -23,115 +25,163 @@ from telegram import InputFile
 
 ADMIN_MEDIA_CHANNEL = -1002659459294
 
+
+# إعدادات قاعدة البيانات MySQL
+DB_HOST = "localhost"
+DB_PORT = 3306
+DB_USER = "botuser"
+DB_PASSWORD = "strongpassword123"
+DB_NAME = "telegram_bot"
+
+
+
+
 DB_PATH = "database.db"
 
-def get_db_connection():
-    return aiosqlite.connect(DB_PATH)
+@asynccontextmanager
+async def get_db_connection():
+    """دالة للاتصال بقاعدة بيانات MySQL"""
+    conn = await aiomysql.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        db=DB_NAME,
+        port=DB_PORT,
+        charset='utf8mb4',
+        autocommit=False
+    )
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-
-# 🧱 أنشئ جداول المواقع
 async def setup_location_tables():
     try:
-        async with get_db_connection() as conn: # <--- السطر المصحح
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS provinces (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL
-                )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS cities (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    province_id INTEGER NOT NULL,
-                    ads_channel TEXT,
-                    FOREIGN KEY (province_id) REFERENCES provinces (id)
-                )
-            """)
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS provinces (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) UNIQUE NOT NULL
+                    )
+                """)
+                await cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS cities (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        province_id INT NOT NULL,
+                        ads_channel VARCHAR(255),
+                        FOREIGN KEY (province_id) REFERENCES provinces(id)
+                    )
+                """)
             await conn.commit()
     except Exception as e:
         logging.error(f"❌ خطأ في setup_location_tables: {e}")
 
-
-
 async def setup_menu_tables():
     try:
-        async with get_db_connection() as conn: # <--- السطر المصحح
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS restaurants (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    city_id INTEGER NOT NULL,
-                    channel TEXT NOT NULL,
-                    open_hour REAL NOT NULL,
-                    close_hour REAL NOT NULL,
-                    is_frozen INTEGER DEFAULT 0,
-                    FOREIGN KEY (city_id) REFERENCES cities(id)
-                )
-            """)
-            # ... (باقي الكود داخل الدالة كما هو)
-            await conn.execute("CREATE TABLE IF NOT EXISTS blacklisted_numbers (phone TEXT PRIMARY KEY)")
-            await conn.execute("CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, restaurant_id INTEGER NOT NULL, UNIQUE(name, restaurant_id), FOREIGN KEY (restaurant_id) REFERENCES restaurants(id))")
-            await conn.execute("CREATE TABLE IF NOT EXISTS meals (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, price INTEGER, category_id INTEGER NOT NULL, caption TEXT, image_file_id TEXT, size_options TEXT, unique_id TEXT UNIQUE, image_message_id INTEGER, UNIQUE(name, category_id), FOREIGN KEY (category_id) REFERENCES categories(id))")
-            async with conn.execute("PRAGMA table_info(meals)") as cursor:
-                meal_columns = [col[1] async for col in cursor]
-            if "caption" not in meal_columns: await conn.execute("ALTER TABLE meals ADD COLUMN caption TEXT")
-            if "image_file_id" not in meal_columns: await conn.execute("ALTER TABLE meals ADD COLUMN image_file_id TEXT")
-            if "size_options" not in meal_columns: await conn.execute("ALTER TABLE meals ADD COLUMN size_options TEXT")
-            if "unique_id" not in meal_columns: await conn.execute("ALTER TABLE meals ADD COLUMN unique_id TEXT UNIQUE")
-            if "image_message_id" not in meal_columns: await conn.execute("ALTER TABLE meals ADD COLUMN image_message_id INTEGER")
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS restaurants (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) UNIQUE NOT NULL,
+                        city_id INT NOT NULL,
+                        channel VARCHAR(255) NOT NULL,
+                        open_hour FLOAT NOT NULL,
+                        close_hour FLOAT NOT NULL,
+                        is_frozen TINYINT DEFAULT 0,
+                        FOREIGN KEY (city_id) REFERENCES cities(id)
+                    )
+                """)
+                await cursor.execute("CREATE TABLE IF NOT EXISTS blacklisted_numbers (phone VARCHAR(20) PRIMARY KEY)")
+                await cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS categories (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        restaurant_id INT NOT NULL,
+                        UNIQUE(name, restaurant_id),
+                        FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+                    )
+                """)
+                await cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS meals (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        price INT,
+                        category_id INT NOT NULL,
+                        caption TEXT,
+                        image_file_id VARCHAR(255),
+                        size_options TEXT,
+                        unique_id VARCHAR(255) UNIQUE,
+                        image_message_id INT,
+                        UNIQUE(name, category_id),
+                        FOREIGN KEY (category_id) REFERENCES categories(id)
+                    )
+                """)
+
+                # التحقق من وجود الأعمدة
+                await cursor.execute("SHOW COLUMNS FROM meals LIKE 'caption'")
+                has_caption = await cursor.fetchone()
+                if not has_caption:
+                    await cursor.execute("ALTER TABLE meals ADD COLUMN caption TEXT")
+
+                await cursor.execute("SHOW COLUMNS FROM meals LIKE 'image_file_id'")
+                has_image_file_id = await cursor.fetchone()
+                if not has_image_file_id:
+                    await cursor.execute("ALTER TABLE meals ADD COLUMN image_file_id VARCHAR(255)")
+
+                await cursor.execute("SHOW COLUMNS FROM meals LIKE 'size_options'")
+                has_size_options = await cursor.fetchone()
+                if not has_size_options:
+                    await cursor.execute("ALTER TABLE meals ADD COLUMN size_options TEXT")
+
+                await cursor.execute("SHOW COLUMNS FROM meals LIKE 'unique_id'")
+                has_unique_id = await cursor.fetchone()
+                if not has_unique_id:
+                    await cursor.execute("ALTER TABLE meals ADD COLUMN unique_id VARCHAR(255) UNIQUE")
+
+                await cursor.execute("SHOW COLUMNS FROM meals LIKE 'image_message_id'")
+                has_image_message_id = await cursor.fetchone()
+                if not has_image_message_id:
+                    await cursor.execute("ALTER TABLE meals ADD COLUMN image_message_id INT")
+
             await conn.commit()
     except Exception as e:
         logging.error(f"❌ خطأ في setup_menu_tables: {e}")
 
-# ✅ تأكد من وجود عمود city_id إذا لم يكن مضافًا (يعمل احتياطيًا فقط إن أردت تشغيله يدويًا)
-async def add_city_id_to_restaurants():
-    try:
-        async with get_db_connection() as conn: # <--- السطر المصحح
-            cursor = await conn.execute("PRAGMA table_info(restaurants)")
-            columns = [col[1] async for col in cursor]
-            await cursor.close()
-            if "city_id" not in columns:
-                await conn.execute("ALTER TABLE restaurants ADD COLUMN city_id INTEGER")
-                print("✅ تم إضافة city_id إلى جدول المطاعم.")
-            else:
-                print("✅ العمود city_id موجود مسبقًا.")
-            await conn.commit()
-    except Exception as e:
-        logging.error(f"❌ خطأ في add_city_id_to_restaurants: {e}")
 
-
-# 🧱 إنشاء جدول الإعلانات
 async def create_ads_table():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS ads (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                city TEXT NOT NULL,
-                restaurant TEXT NOT NULL,
-                ad_text TEXT NOT NULL,
-                media_file_id TEXT NOT NULL,
-                media_type TEXT NOT NULL,
-                expire_timestamp INTEGER NOT NULL
-            )
-        """)
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ads (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    city_id INT NOT NULL,
+                    restaurant_id INT NOT NULL,
+                    ad_text TEXT NOT NULL,
+                    media_file_id VARCHAR(255) NOT NULL,
+                    media_type VARCHAR(50) NOT NULL,
+                    expire_timestamp BIGINT NOT NULL,
+                    FOREIGN KEY (city_id) REFERENCES cities(id),
+                    FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+                )
+            """)
         await conn.commit()
 
 
-
-# ✅ إضافة عمود unique_id إلى الوجبات
 async def add_unique_id_column():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("PRAGMA table_info(meals)") as cursor:
-            meal_columns = [col[1] async for col in cursor]
-        if "unique_id" not in meal_columns:
-            await conn.execute("ALTER TABLE meals ADD COLUMN unique_id TEXT")
-            print("✅ تم إضافة العمود unique_id إلى جدول meals.")
-        else:
-            print("✅ العمود unique_id موجود بالفعل.")
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SHOW COLUMNS FROM meals LIKE 'unique_id'")
+            has_unique_id = await cursor.fetchone()
+            if not has_unique_id:
+                await cursor.execute("ALTER TABLE meals ADD COLUMN unique_id VARCHAR(255) UNIQUE")
+                print("✅ تم إضافة العمود unique_id إلى جدول meals.")
+            else:
+                print("✅ العمود unique_id موجود بالفعل.")
         await conn.commit()
-
 
 
 
@@ -139,200 +189,118 @@ def generate_unique_id(length=50):
   alphabet = string.ascii_letters + string.digits
   return ''.join(secrets.choice(alphabet) for _ in range(length))
 
+
 async def ensure_is_frozen_column():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("PRAGMA table_info(restaurants)") as cursor:
-            columns = [col[1] async for col in cursor]
-        if "is_frozen" not in columns:
-            await conn.execute("ALTER TABLE restaurants ADD COLUMN is_frozen INTEGER DEFAULT 0")
-            print("✅ تم إضافة عمود is_frozen إلى جدول المطاعم.")
-        else:
-            print("✅ العمود is_frozen موجود مسبقًا.")
-        await conn.commit()
-
-
-
-
-async def drop_old_city_column():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        # ... (باقي الكود داخل الدالة كما هو)
-        async with conn.execute("PRAGMA table_info(restaurants)") as cursor:
-            columns = [col[1] async for col in cursor]
-        if "city" not in columns: print("✅ العمود city محذوف مسبقًا."); return
-        async with conn.execute("SELECT id, name, city, channel, open_hour, close_hour FROM restaurants") as cursor:
-            old_restaurants = await cursor.fetchall()
-        async with conn.execute("SELECT id, name FROM cities") as cursor:
-            city_map = {name: id_ async for id_, name in cursor}
-        await conn.execute("CREATE TABLE IF NOT EXISTS restaurants_new (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, city_id INTEGER NOT NULL, channel TEXT NOT NULL, open_hour REAL NOT NULL, close_hour REAL NOT NULL, is_frozen INTEGER DEFAULT 0, FOREIGN KEY (city_id) REFERENCES cities(id))")
-        skipped = 0
-        for r in old_restaurants:
-            old_id, name, old_city_name, channel, open_hour, close_hour = r
-            city_id = city_map.get(old_city_name)
-            if not city_id: print(f"⚠️ لم يتم العثور على city_id للمدينة \'{old_city_name}\' - تجاهل المطعم \'{name}\'"); skipped += 1; continue
-            await conn.execute("INSERT OR IGNORE INTO restaurants_new (id, name, city_id, channel, open_hour, close_hour) VALUES (?, ?, ?, ?, ?, ?)", (old_id, name, city_id, channel, open_hour, close_hour))
-        await conn.execute("DROP TABLE restaurants")
-        await conn.execute("ALTER TABLE restaurants_new RENAME TO restaurants")
-        await conn.commit()
-        print("✅ تم حذف العمود city نهائيًا من جدول restaurants.")
-        if skipped: print(f"⚠️ عدد المطاعم التي تم تجاهلها بسبب غياب المدينة: {skipped}")
-
-
-async def verify_city_column_removed():
-    try:
-        async with aiosqlite.connect("database.db") as conn:
-            async with conn.execute("PRAGMA table_info(restaurants)") as cursor:
-                rows = await cursor.fetchall()
-                columns = [col[1] for col in rows]
-
-        if "city" in columns:
-            print("❌ العمود city لا يزال موجودًا في جدول restaurants.")
-        else:
-            print("✅ تأكيد: العمود city غير موجود في جدول restaurants.")
-
-    except Exception as e:
-        logging.error(f"❌ خطأ أثناء التحقق من العمود city: {e}")
-
-
-
-async def sync_city_ids_in_restaurants():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("PRAGMA table_info(restaurants)") as cursor:
-            columns = [col[1] async for col in cursor]
-        if "city_id" not in columns: print("❌ العمود city_id غير موجود في جدول restaurants."); return
-        if "city" not in columns: print("⚠️ العمود city غير موجود. لا حاجة للمزامنة."); return
-        async with conn.execute("SELECT id, name FROM cities") as cursor:
-            city_map = {name: id_ async for id_, name in cursor}
-        async with conn.execute("SELECT id, city FROM restaurants") as cursor:
-            restaurants = await cursor.fetchall()
-        updated = 0
-        for r_id, city_name in restaurants:
-            city_id = city_map.get(city_name)
-            if city_id:
-                await conn.execute("UPDATE restaurants SET city_id = ? WHERE id = ?", (city_id, r_id))
-                updated += 1
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SHOW COLUMNS FROM restaurants LIKE 'is_frozen'")
+            has_is_frozen = await cursor.fetchone()
+            if not has_is_frozen:
+                await cursor.execute("ALTER TABLE restaurants ADD COLUMN is_frozen TINYINT DEFAULT 0")
+                print("✅ تم إضافة عمود is_frozen إلى جدول المطاعم.")
             else:
-                print(f"⚠️ لم يتم العثور على معرف لمدينة: {city_name}")
+                print("✅ العمود is_frozen موجود مسبقًا.")
         await conn.commit()
-        print(f"✅ تم تحديث {updated} مطعم/مطاعم بقيم city_id الصحيحة.")
-
-# 🧪 سكربت لفحص بنية جدول الوجبات
-async def debug_check_meals_table_structure():
-    print("🧪 فحص بنية جدول الوجبات:")
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("PRAGMA table_info(meals)") as cursor:
-            columns = await cursor.fetchall()
-        if not columns: print("❌ جدول meals غير موجود.")
-        else: 
-            for col in columns: print(f"- الاسم: {col[1]:<15} | النوع: {col[2]:<10} | NOT NULL: {col[3]}")
 
 
 
-async def debug_check_categories_and_restaurants():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        print("📊 جميع الفئات المرتبطة بكل مطعم:")
-        async with conn.execute("SELECT c.id, c.name, r.name, r.id FROM categories c JOIN restaurants r ON c.restaurant_id = r.id") as cursor:
-            rows = await cursor.fetchall()
-            for row in rows: print(f"🧾 الفئة: {row[1]} - المطعم: {row[2]} (category_id: {row[0]}, restaurant_id: {row[3]})")
+async def check_sizes_format():
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, name, size_options FROM meals WHERE size_options IS NOT NULL")
+            meals = await cursor.fetchall()
 
-async def print_all_meal_names():
-    try:
-        async with get_db_connection() as conn:
-            async with conn.execute("SELECT name FROM meals") as cursor:
-                rows = await cursor.fetchall()
-                if not rows:
-                    print("❌ لا توجد وجبات مسجلة.")
+        total_meals = 0
+        correct_meals = 0
+        wrong_meals = 0
+
+        for meal_id, meal_name, size_options_json in meals:
+            try:
+                sizes = json.loads(size_options_json)
+                if not isinstance(sizes, list):
+                    print(f"❌ {meal_name} (ID {meal_id}) - القياسات ليست قائمة List!")
+                    wrong_meals += 1
+                    continue
+
+                if all(isinstance(s, dict) and "name" in s and "price" in s for s in sizes):
+                    correct_meals += 1
                 else:
-                    print("🍽️ أسماء جميع الوجبات:")
-                    for row in rows:
-                        print(f"- {row[0]}")
-    except Exception as e:
-        logging.error(f"❌ خطأ في print_all_meal_names: {e}")
+                    print(f"❌ {meal_name} (ID {meal_id}) - يوجد قياسات غير صحيحة.")
+                    wrong_meals += 1
 
+            except Exception as e:
+                print(f"❌ خطأ عند قراءة {meal_name} (ID {meal_id}): {e}")
+                wrong_meals += 1
 
-def check_sizes_format():
-  conn = sqlite3.connect("database.db")
-  cursor = conn.cursor()
+            total_meals += 1
 
-  cursor.execute("SELECT id, name, size_options FROM meals WHERE size_options IS NOT NULL")
-  meals = cursor.fetchall()
-
-  total_meals = 0
-  correct_meals = 0
-  wrong_meals = 0
-
-  for meal_id, meal_name, size_options_json in meals:
-      try:
-          sizes = json.loads(size_options_json)
-          if not isinstance(sizes, list):
-              print(f"❌ {meal_name} (ID {meal_id}) - القياسات ليست قائمة List!")
-              wrong_meals += 1
-              continue
-
-          if all(isinstance(s, dict) and "name" in s and "price" in s for s in sizes):
-              correct_meals += 1
-          else:
-              print(f"❌ {meal_name} (ID {meal_id}) - يوجد قياسات غير صحيحة.")
-              wrong_meals += 1
-
-      except Exception as e:
-          print(f"❌ خطأ عند قراءة {meal_name} (ID {meal_id}): {e}")
-          wrong_meals += 1
-
-      total_meals += 1
-
-  conn.close()
-
-  print("\n📋 تقرير فحص القياسات:")
-  print(f"✅ عدد الوجبات المفحوصة: {total_meals}")
-  print(f"✅ عدد الوجبات الصحيحة: {correct_meals}")
-  print(f"⚠️ عدد الوجبات الخاطئة: {wrong_meals}")
-  print("✅ تم تنفيذ فحص قياسات جميع الوجبات.\n")
-
+    print("\n📋 تقرير فحص القياسات:")
+    print(f"✅ عدد الوجبات المفحوصة: {total_meals}")
+    print(f"✅ عدد الوجبات الصحيحة: {correct_meals}")
+    print(f"⚠️ عدد الوجبات الخاطئة: {wrong_meals}")
+    print("✅ تم تنفيذ فحص قياسات جميع الوجبات.\n")
 
 async def normalize_size_options():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("SELECT id, size_options FROM meals WHERE size_options IS NOT NULL") as cursor:
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, size_options FROM meals WHERE size_options IS NOT NULL")
             meals = await cursor.fetchall()
+
         updated_count = 0
         for meal_id, size_options_json in meals:
             try:
                 sizes = json.loads(size_options_json)
-                if all(isinstance(s, dict) for s in sizes): continue
+                if all(isinstance(s, dict) for s in sizes): 
+                    continue
+
                 normalized = []
                 for item in sizes:
-                    if isinstance(item, str) and "/" in item: name, price = item.split("/"); normalized.append({"name": name.strip(), "price": int(price.strip())})
-                    elif isinstance(item, dict): normalized.append(item)
-                await conn.execute("UPDATE meals SET size_options = ? WHERE id = ?", (json.dumps(normalized, ensure_ascii=False), meal_id))
+                    if isinstance(item, str) and "/" in item: 
+                        name, price = item.split("/")
+                        normalized.append({"name": name.strip(), "price": int(price.strip())})
+                    elif isinstance(item, dict): 
+                        normalized.append(item)
+
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        "UPDATE meals SET size_options = %s WHERE id = %s", 
+                        (json.dumps(normalized, ensure_ascii=False), meal_id)
+                    )
                 updated_count += 1
-            except Exception as e: print(f"❌ خطأ في معالجة الوجبة ID={meal_id}: {e}")
+            except Exception as e: 
+                print(f"❌ خطأ في معالجة الوجبة ID={meal_id}: {e}")
+
         await conn.commit()
         print(f"✅ تم تحديث {updated_count} وجبة إلى الصيغة الجديدة.")
 
-
 async def add_ads_channel_column_to_cities():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("PRAGMA table_info(cities)") as cursor:
-            columns = [col[1] async for col in cursor]
-        if "ads_channel" not in columns:
-            await conn.execute("ALTER TABLE cities ADD COLUMN ads_channel TEXT")
-            print("✅ تم إضافة عمود ads_channel إلى جدول المدن.")
-        else:
-            print("✅ العمود ads_channel موجود بالفعل.")
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SHOW COLUMNS FROM cities LIKE 'ads_channel'")
+            has_ads_channel = await cursor.fetchone()
+            if not has_ads_channel:
+                await cursor.execute("ALTER TABLE cities ADD COLUMN ads_channel VARCHAR(255)")
+                print("✅ تم إضافة عمود ads_channel إلى جدول المدن.")
+            else:
+                print("✅ العمود ads_channel موجود بالفعل.")
         await conn.commit()
 
 
 async def update_restaurants_city_id():
-    async with get_db_connection() as conn: # <--- السطر المصحح
-        async with conn.execute("SELECT id, name FROM cities") as cursor:
-            cities_data = await cursor.fetchall() # استخدم اسما مختلفا لتجنب الارتباك
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT id, name FROM cities")
+            cities_data = await cursor.fetchall()
             city_map = {name: cid for cid, name in cities_data}
+
         updated = 0
-        for city_name, city_id_val in city_map.items(): # استخدم اسما مختلفا للمتغير
-            result = await conn.execute("UPDATE restaurants SET city_id = ? WHERE city = ?", (city_id_val, city_name))
-            updated += result.rowcount
+        for city_name, city_id_val in city_map.items():
+            async with conn.cursor() as cursor:
+                await cursor.execute("UPDATE restaurants SET city_id = %s WHERE city = %s", (city_id_val, city_name))
+                updated += cursor.rowcount
+
         await conn.commit()
         print(f"✅ تم تحديث {updated} مطعمًا بـ city_id.")
-
 
 
 # 🔐 توكن بوت الإدارة (غيّره بتوكنك الفعلي)
@@ -413,7 +381,6 @@ async def manage_provinces(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-
 async def handle_province_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -429,9 +396,11 @@ async def handle_province_action(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["province_action"] = "delete"
 
         elif action == "edit_province_name":
-            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-                async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
-                    provinces = [row[0] async for row in cursor]
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT name FROM provinces ORDER BY name")
+                    provinces_data = await cursor.fetchall()
+                    provinces = [row[0] for row in provinces_data]
 
             if not provinces:
                 await query.edit_message_text("❌ لا توجد محافظات مسجلة.")
@@ -454,82 +423,82 @@ async def handle_province_action(update: Update, context: ContextTypes.DEFAULT_T
 
 
 
-
-
 async def handle_province_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         province_name = update.message.text.strip()
         action = context.user_data.get("province_action")
 
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            cursor = await conn.cursor()
-
-            if action == "add":
-                try:
-                    await cursor.execute("INSERT INTO provinces (name) VALUES (?)", (province_name,))
-                    await conn.commit()
-                    await update.message.reply_text(f"✅ تم إضافة المحافظة: {province_name}")
-                except aiosqlite.IntegrityError:
-                    await update.message.reply_text("⚠️ هذه المحافظة موجودة بالفعل.")
-
-            elif action == "delete":
-                await cursor.execute("SELECT id FROM provinces WHERE name = ?", (province_name,))
-                result = await cursor.fetchone()
-
-                if not result:
-                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة.")
-                    return
-
-                province_id = result[0]
-
-                # جلب معرفات المدن
-                await cursor.execute("SELECT id FROM cities WHERE province_id = ?", (province_id,))
-                city_ids = [row[0] async for row in cursor]
-
-                for city_id in city_ids:
-                    await cursor.execute("SELECT id FROM restaurants WHERE city_id = ?", (city_id,))
-                    restaurant_ids = [row[0] async for row in cursor]
-
-                    for rest_id in restaurant_ids:
-                        await cursor.execute("DELETE FROM meals WHERE category_id IN (SELECT id FROM categories WHERE restaurant_id = ?)", (rest_id,))
-                        await cursor.execute("DELETE FROM categories WHERE restaurant_id = ?", (rest_id,))
-                        await cursor.execute("DELETE FROM restaurants WHERE id = ?", (rest_id,))
-
-                await cursor.execute("DELETE FROM cities WHERE province_id = ?", (province_id,))
-                await cursor.execute("DELETE FROM provinces WHERE id = ?", (province_id,))
-                await cursor.execute("SELECT user_id FROM user_data WHERE province = ?", (province_name,))
-                users = [row[0] async for row in cursor]
-
-                for user_id in users:
-                    await cursor.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                if action == "add":
                     try:
-                        await context.bot.send_message(
-                            chat_id=user_id,
-                            text="❌ انتهت خدمتنا في محافظتك مؤقتًا.\nسنحاول العودة قريبًا بإذن الله.\nسنبدأ من جديد الآن..."
-                        )
-                        await start(update=update, context=context)
-                    except Exception:
-                        pass
+                        await cursor.execute("INSERT INTO provinces (name) VALUES (%s)", (province_name,))
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم إضافة المحافظة: {province_name}")
+                    except pymysql.err.IntegrityError:
+                        await update.message.reply_text("⚠️ هذه المحافظة موجودة بالفعل.")
 
-                await conn.commit()
-                await update.message.reply_text(f"🗑️ تم حذف المحافظة '{province_name}' وكل ما يتعلق بها.")
+                elif action == "delete":
+                    await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province_name,))
+                    result = await cursor.fetchone()
 
-            elif action == "rename_old":
-                context.user_data["old_province_name"] = province_name
-                context.user_data["province_action"] = "rename_new"
-                await update.message.reply_text("✏️ أرسل الاسم الجديد للمحافظة:")
+                    if not result:
+                        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة.")
+                        return
 
-            elif action == "rename_new":
-                old_name = context.user_data.get("old_province_name")
-                new_name = province_name
-                try:
-                    await cursor.execute("UPDATE provinces SET name = ? WHERE name = ?", (new_name, old_name))
-                    await cursor.execute("UPDATE user_data SET province = ? WHERE province = ?", (new_name, old_name))
+                    province_id = result[0]
+
+                    # جلب معرفات المدن
+                    await cursor.execute("SELECT id FROM cities WHERE province_id = %s", (province_id,))
+                    city_ids_data = await cursor.fetchall()
+                    city_ids = [row[0] for row in city_ids_data]
+
+                    for city_id in city_ids:
+                        await cursor.execute("SELECT id FROM restaurants WHERE city_id = %s", (city_id,))
+                        restaurant_ids_data = await cursor.fetchall()
+                        restaurant_ids = [row[0] for row in restaurant_ids_data]
+
+                        for rest_id in restaurant_ids:
+                            await cursor.execute("DELETE FROM meals WHERE category_id IN (SELECT id FROM categories WHERE restaurant_id = %s)", (rest_id,))
+                            await cursor.execute("DELETE FROM categories WHERE restaurant_id = %s", (rest_id,))
+                            await cursor.execute("DELETE FROM restaurants WHERE id = %s", (rest_id,))
+
+                    await cursor.execute("DELETE FROM cities WHERE province_id = %s", (province_id,))
+                    await cursor.execute("DELETE FROM provinces WHERE id = %s", (province_id,))
+                    await cursor.execute("SELECT user_id FROM user_data WHERE province = %s", (province_name,))
+                    users_data = await cursor.fetchall()
+                    users = [row[0] for row in users_data]
+
+                    for user_id in users:
+                        await cursor.execute("DELETE FROM user_data WHERE user_id = %s", (user_id,))
+                        try:
+                            await context.bot.send_message(
+                                chat_id=user_id,
+                                text="❌ انتهت خدمتنا في محافظتك مؤقتًا.\nسنحاول العودة قريبًا بإذن الله.\nسنبدأ من جديد الآن..."
+                            )
+                            await start(update=update, context=context)
+                        except Exception:
+                            pass
+
                     await conn.commit()
-                    await update.message.reply_text(f"✅ تم تعديل اسم المحافظة من '{old_name}' إلى '{new_name}'.")
-                except aiosqlite.IntegrityError:
-                    await update.message.reply_text("⚠️ توجد محافظة بهذا الاسم مسبقًا.")
-                context.user_data.pop("old_province_name", None)
+                    await update.message.reply_text(f"🗑️ تم حذف المحافظة '{province_name}' وكل ما يتعلق بها.")
+
+                elif action == "rename_old":
+                    context.user_data["old_province_name"] = province_name
+                    context.user_data["province_action"] = "rename_new"
+                    await update.message.reply_text("✏️ أرسل الاسم الجديد للمحافظة:")
+
+                elif action == "rename_new":
+                    old_name = context.user_data.get("old_province_name")
+                    new_name = province_name
+                    try:
+                        await cursor.execute("UPDATE provinces SET name = %s WHERE name = %s", (new_name, old_name))
+                        await cursor.execute("UPDATE user_data SET province = %s WHERE province = %s", (new_name, old_name))
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم تعديل اسم المحافظة من '{old_name}' إلى '{new_name}'.")
+                    except pymysql.err.IntegrityError:
+                        await update.message.reply_text("⚠️ توجد محافظة بهذا الاسم مسبقًا.")
+                    context.user_data.pop("old_province_name", None)
 
         context.user_data.pop("province_action", None)
         await start(update, context)
@@ -556,15 +525,16 @@ async def handle_rename_province_old(update: Update, context: ContextTypes.DEFAU
 
 
 
-
 async def manage_cities(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
 
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
-                provinces = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM provinces ORDER BY name")
+                provinces_data = await cursor.fetchall()
+                provinces = [row[0] for row in provinces_data]
 
         if not provinces:
             await query.edit_message_text("❌ لا توجد محافظات مسجلة.")
@@ -583,7 +553,6 @@ async def manage_cities(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"خطأ في manage_cities: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء عرض المحافظات.")
-
 
 
 async def handle_province_for_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -612,7 +581,6 @@ async def handle_province_for_city(update: Update, context: ContextTypes.DEFAULT
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحديد المحافظة.")
 
 
-
 async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -634,13 +602,15 @@ async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.edit_message_text("⚠️ لم يتم تحديد المحافظة.")
                 return
 
-            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-                async with conn.execute("""
-                    SELECT c.name FROM cities c
-                    JOIN provinces p ON c.province_id = p.id
-                    WHERE p.name = ?
-                """, (province,)) as cursor:
-                    cities = [row[0] async for row in cursor]
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT c.name FROM cities c
+                        JOIN provinces p ON c.province_id = p.id
+                        WHERE p.name = %s
+                    """, (province,))
+                    cities_data = await cursor.fetchall()
+                    cities = [row[0] for row in cities_data]
 
             if not cities:
                 await query.edit_message_text("❌ لا توجد مدن مسجلة في هذه المحافظة.")
@@ -663,13 +633,15 @@ async def handle_city_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.edit_message_text("⚠️ لم يتم تحديد المحافظة.")
                 return
 
-            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-                async with conn.execute("""
-                    SELECT c.name FROM cities c
-                    JOIN provinces p ON c.province_id = p.id
-                    WHERE p.name = ?
-                """, (province,)) as cursor:
-                    cities = [row[0] async for row in cursor]
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT c.name FROM cities c
+                        JOIN provinces p ON c.province_id = p.id
+                        WHERE p.name = %s
+                    """, (province,))
+                    cities_data = await cursor.fetchall()
+                    cities = [row[0] for row in cities_data]
 
             if not cities:
                 await query.edit_message_text("❌ لا توجد مدن مسجلة في هذه المحافظة.")
@@ -709,7 +681,6 @@ async def handle_rename_city_old(update: Update, context: ContextTypes.DEFAULT_T
 
 
 
-
 async def handle_city_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         province = context.user_data.get("selected_province")
@@ -720,82 +691,99 @@ async def handle_city_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ لم يتم تحديد المحافظة. يرجى العودة واختيار المحافظة أولًا.")
             return
 
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            cursor = await conn.execute("SELECT id FROM provinces WHERE name = ?", (province,))
-            result = await cursor.fetchone()
-            if not result:
-                await update.message.reply_text("⚠️ لم يتم العثور على المحافظة.")
-                return
-            province_id = result[0]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province,))
+                result = await cursor.fetchone()
+                if not result:
+                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة.")
+                    return
+                province_id = result[0]
 
-            # 🟡 إضافة مدينة جديدة (الاسم)
-            if action == "add_city" and "new_city_name" not in context.user_data:
-                context.user_data["new_city_name"] = text
-                await update.message.reply_text("✏️ أرسل معرف قناة الإعلانات الخاصة بالمدينة (ابدأ بـ @) أو اكتب 'لا يوجد'.")
-                return
-
-            # 🟡 إضافة مدينة جديدة (المعرف)
-            elif action == "add_city" and "new_city_name" in context.user_data:
-                city_name = context.user_data["new_city_name"]
-                ads_channel = text.strip()
-
-                if ads_channel.lower() == "لا يوجد":
-                    ads_channel = None
-                elif not ads_channel.startswith("@"):
-                    await update.message.reply_text("⚠️ يجب أن يبدأ معرف القناة بـ @ أو اكتب 'لا يوجد'.")
+                # 🟡 إضافة مدينة جديدة (الاسم)
+                if action == "add_city" and "new_city_name" not in context.user_data:
+                    context.user_data["new_city_name"] = text
+                    await update.message.reply_text("✏️ أرسل معرف قناة الإعلانات الخاصة بالمدينة (ابدأ بـ @) أو اكتب 'لا يوجد'.")
                     return
 
-                try:
-                    await conn.execute(
-                        "INSERT INTO cities (name, province_id, ads_channel) VALUES (?, ?, ?)",
-                        (city_name, province_id, ads_channel)
-                    )
+                # 🟡 إضافة مدينة جديدة (المعرف)
+                elif action == "add_city" and "new_city_name" in context.user_data:
+                    city_name = context.user_data["new_city_name"]
+                    ads_channel = text.strip()
+
+                    if ads_channel.lower() == "لا يوجد":
+                        ads_channel = None
+                    elif not ads_channel.startswith("@"):
+                        await update.message.reply_text("⚠️ يجب أن يبدأ معرف القناة بـ @ أو اكتب 'لا يوجد'.")
+                        return
+
+                    try:
+                        await cursor.execute(
+                            "INSERT INTO cities (name, province_id, ads_channel) VALUES (%s, %s, %s)",
+                            (city_name, province_id, ads_channel)
+                        )
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم إضافة المدينة '{city_name}' بنجاح.")
+                    except pymysql.err.IntegrityError:
+                        await update.message.reply_text("⚠️ هذه المدينة موجودة بالفعل.")
+
+                    context.user_data.pop("new_city_name", None)
+                    context.user_data.pop("city_action", None)
+                    await start(update, context)
+                    return
+
+                # 🟡 حذف مدينة
+                elif action == "delete_city":
+                    await cursor.execute("DELETE FROM cities WHERE name = %s AND province_id = %s", (text, province_id))
                     await conn.commit()
-                    await update.message.reply_text(f"✅ تم إضافة المدينة '{city_name}' بنجاح.")
-                except aiosqlite.IntegrityError:
-                    await update.message.reply_text("⚠️ هذه المدينة موجودة بالفعل.")
+                    await update.message.reply_text(f"🗑️ تم حذف المدينة '{text}' بنجاح.")
 
-                context.user_data.pop("new_city_name", None)
-                context.user_data.pop("city_action", None)
-                await start(update, context)
-                return
+                # 🟡 تعديل اسم مدينة (استقبال الاسم القديم)
+                elif action == "rename_city_old":
+                    context.user_data["old_city_name"] = text
+                    context.user_data["city_action"] = "rename_city_new"
+                    await update.message.reply_text("✏️ أرسل الاسم الجديد للمدينة:")
+                    return
 
-            # 🟡 حذف مدينة
-            elif action == "delete_city":
-                await conn.execute("DELETE FROM cities WHERE name = ? AND province_id = ?", (text, province_id))
-                await conn.commit()
-                await update.message.reply_text(f"🗑️ تم حذف المدينة '{text}' بنجاح.")
+                # 🟡 تعديل اسم مدينة (استقبال الاسم الجديد)
+                elif action == "rename_city_new":
+                    old_name = context.user_data.get("old_city_name")
+                    new_name = text
 
-            # 🟡 تعديل اسم مدينة (استقبال الاسم القديم)
-            elif action == "rename_city_old":
-                context.user_data["old_city_name"] = text
-                context.user_data["city_action"] = "rename_city_new"
-                await update.message.reply_text("✏️ أرسل الاسم الجديد للمدينة:")
-                return
+                    try:
+                        # الحصول على معرف المدينة القديمة
+                        await cursor.execute(
+                            "SELECT id FROM cities WHERE name = %s AND province_id = %s",
+                            (old_name, province_id)
+                        )
+                        result = await cursor.fetchone()
+                        if not result:
+                            await update.message.reply_text("⚠️ لم يتم العثور على المدينة.")
+                            return
+                        city_id = result[0]
 
-            # 🟡 تعديل اسم مدينة (استقبال الاسم الجديد)
-            elif action == "rename_city_new":
-                old_name = context.user_data.get("old_city_name")
-                new_name = text
+                        # تحديث اسم المدينة
+                        await cursor.execute("UPDATE cities SET name = %s WHERE id = %s", (new_name, city_id))
 
-                try:
-                    await conn.execute("UPDATE cities SET name = ? WHERE name = ? AND province_id = ?", (new_name, old_name, province_id))
-                    await conn.execute("UPDATE user_data SET city = ? WHERE city = ?", (new_name, old_name))
-                    await conn.execute("UPDATE restaurants SET city = ? WHERE city = ?", (new_name, old_name))
-                    await conn.commit()
-                    await update.message.reply_text(f"✅ تم تعديل اسم المدينة من '{old_name}' إلى '{new_name}'.")
-                except aiosqlite.IntegrityError:
-                    await update.message.reply_text("⚠️ هناك مدينة بهذا الاسم موجودة مسبقًا.")
+                        # تحديث المستخدمين الذين ينتمون لهذه المدينة
+                        await cursor.execute("UPDATE user_data SET city_id = %s WHERE city_id = %s", (city_id, city_id))
 
-                context.user_data.pop("old_city_name", None)
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم تعديل اسم المدينة من '{old_name}' إلى '{new_name}'.")
 
+                    except pymysql.err.IntegrityError:
+                        await update.message.reply_text("⚠️ هناك مدينة بهذا الاسم موجودة مسبقًا.")
+
+        # تنظيف السياقات بعد الانتهاء
         context.user_data.pop("city_action", None)
+        context.user_data.pop("old_city_name", None)
         context.user_data.pop("selected_province", None)
         await start(update, context)
 
     except Exception as e:
         logging.error(f"خطأ في handle_city_name: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ العملية.")
+
 
 
 async def handle_select_city_for_ads_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -815,7 +803,6 @@ async def handle_select_city_for_ads_channel(update: Update, context: ContextTyp
         logging.error(f"خطأ في handle_select_city_for_ads_channel: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحديد المدينة.")
 
-
 async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         new_channel = update.message.text.strip()
@@ -831,9 +818,10 @@ async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DE
             await update.message.reply_text("⚠️ يجب أن يبدأ معرف القناة بـ @ أو اكتب 'لا يوجد'.")
             return
 
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            await conn.execute("UPDATE cities SET ads_channel = ? WHERE name = ?", (new_channel, city))
-            await conn.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("UPDATE cities SET ads_channel = %s WHERE name = %s", (new_channel, city))
+                await conn.commit()
 
         await update.message.reply_text(f"✅ تم تعديل قناة الإعلانات لمدينة '{city}' بنجاح.")
         context.user_data.pop("city_action", None)
@@ -845,35 +833,6 @@ async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DE
         await update.message.reply_text("❌ حدث خطأ أثناء تعديل القناة.")
 
 
-async def handle_send_city_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        query = update.callback_query
-        await query.answer()
-
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            async with conn.execute("SELECT id, name FROM cities ORDER BY name") as cursor:
-                cities = await cursor.fetchall()
-
-        if not cities:
-            await query.edit_message_text("❌ لا توجد مدن مسجلة.")
-            return
-
-        keyboard = [[InlineKeyboardButton("📢 إلى كل المدن", callback_data="ad_city_all")]]
-        keyboard += [
-            [InlineKeyboardButton(city_name, callback_data=f"ad_city_{city_id}")]
-            for city_id, city_name in cities
-        ]
-        keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="go_main_menu")])
-
-        await query.edit_message_text(
-            "🌆 اختر المدينة التي تريد إرسال الإعلان إليها:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    except Exception as e:
-        logging.error(f"خطأ في handle_send_city_ad: {e}")
-        await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المدن.")
-
-
 async def handle_ad_all_cities_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -883,8 +842,9 @@ async def handle_ad_all_cities_selected(update: Update, context: ContextTypes.DE
         context.user_data["ad_all_cities"] = True
         context.user_data["ad_step"] = "awaiting_ad_restaurant_for_all"
 
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            async with conn.execute("SELECT id, name FROM restaurants ORDER BY name") as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id, name FROM restaurants ORDER BY name")
                 restaurants = await cursor.fetchall()
 
         if not restaurants:
@@ -904,54 +864,55 @@ async def handle_ad_all_cities_selected(update: Update, context: ContextTypes.DE
         logging.error(f"خطأ في handle_ad_all_cities_selected: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
 
-
 async def handle_ad_city_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
 
-        city_id_raw = query.data.replace("ad_city_", "")
+        city_data = query.data.split("ad_city_")[1]
+        city_id = int(city_data)
 
-        if city_id_raw == "all":
-            context.user_data["ad_city"] = "all"
-            context.user_data["ad_city_id"] = "all"
-            restaurants = []
-            city_name = "كل المدن"
-        else:
-            city_id = int(city_id_raw)
-            context.user_data["ad_city_id"] = city_id
+        # الحصول على اسم المدينة للعرض
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM cities WHERE id = %s", (city_id,))
+                city_name_result = await cursor.fetchone()
+                city_name = city_name_result[0] if city_name_result else "غير معروف"
 
-            async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-                async with conn.execute("SELECT name FROM cities WHERE id = ?", (city_id,)) as cursor:
-                    row = await cursor.fetchone()
+        context.user_data["ad_city_id"] = city_id
+        context.user_data["ad_city_name"] = city_name
+        context.user_data.pop("ad_skip_city", None)
+        context.user_data["ad_step"] = "awaiting_restaurant_selection"
 
-                if not row:
-                    await query.edit_message_text("❌ لم يتم العثور على المدينة.")
-                    return
-
-                city_name = row[0]
-                context.user_data["ad_city"] = city_name
-
-                async with conn.execute("SELECT id, name FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
-                    restaurants = await cursor.fetchall()
+        # الحصول على قائمة المطاعم في المدينة المحددة
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT id, name FROM restaurants 
+                    WHERE city_id = %s
+                """, (city_id,))
+                restaurants_data = await cursor.fetchall()
+                restaurants = [(row[0], row[1]) for row in restaurants_data]
 
         if not restaurants:
-            await query.edit_message_text("❌ لا توجد مطاعم في هذه المدينة.")
+            await query.edit_message_text(f"❌ لا توجد مطاعم مسجلة في {city_name}.")
             return
 
-        keyboard = [[InlineKeyboardButton("⏭️ تخطي اختيار المطعم (نص حر)", callback_data="skip_ad_restaurant")]]
-        for rid, name in restaurants:
-            keyboard.append([InlineKeyboardButton(name, callback_data=f"ad_restaurant_{rid}")])
+        keyboard = []
+        for restaurant_id, restaurant_name in restaurants:
+            keyboard.append([InlineKeyboardButton(restaurant_name, callback_data=f"ad_restaurant_{restaurant_id}")])
 
-        text = f"🏪 اختر المطعم الذي تريد الإعلان باسمه في مدينة {city_name}:"
-        if city_id_raw == "all":
-            text = "🏪 اختر المطعم الذي تريد الإعلان باسمه في جميع المدن:\n(أو اختر تخطي لإرسال إعلان حر بدون اسم مطعم)"
+        keyboard.append([InlineKeyboardButton("تخطي اختيار المطعم ⏭️", callback_data="ad_skip_restaurant")])
 
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text(
+            f"🏪 اختر المطعم الذي يتعلق به الإعلان في {city_name}:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     except Exception as e:
         logging.error(f"خطأ في handle_ad_city_selected: {e}")
-        await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
+        await update.effective_message.reply_text("❌ حدث خطأ أثناء اختيار المدينة.")
+
 
 
 
@@ -974,18 +935,24 @@ async def handle_ad_restaurant_selected(update: Update, context: ContextTypes.DE
         query = update.callback_query
         await query.answer()
 
-        restaurant_id = int(query.data.replace("ad_restaurant_", ""))
-        context.user_data["ad_restaurant_id"] = restaurant_id
-
-        async with get_db_connection() as conn:  # <-- تم تصحيح هذا السطر
-            async with conn.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,)) as cursor:
-                row = await cursor.fetchone()
-
-        if not row:
-            await query.edit_message_text("❌ لم يتم العثور على المطعم.")
+        if query.data == "ad_skip_restaurant":
+            context.user_data["ad_skip_restaurant"] = True
+            context.user_data["ad_step"] = "awaiting_ad_text"
+            await query.edit_message_text("📝 أرسل نص الإعلان الذي تريد نشره:")
             return
 
-        context.user_data["ad_restaurant"] = row[0]
+        restaurant_data = query.data.split("ad_restaurant_")[1]
+        restaurant_id = int(restaurant_data)
+
+        # الحصول على اسم المطعم للعرض
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM restaurants WHERE id = %s", (restaurant_id,))
+                restaurant_name_result = await cursor.fetchone()
+                restaurant_name = restaurant_name_result[0] if restaurant_name_result else "غير معروف"
+
+        context.user_data["ad_restaurant_id"] = restaurant_id
+        context.user_data["ad_restaurant_name"] = restaurant_name
         context.user_data.pop("ad_skip_restaurant", None)
         context.user_data["ad_step"] = "awaiting_ad_text"
 
@@ -1030,15 +997,43 @@ async def handle_ad_duration_input(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ حدث خطأ أثناء إدخال مدة الإعلان.")
 
 
+
+async def save_ad_to_database(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        user_data = context.user_data
+        city_id = user_data.get("ad_city_id")
+        restaurant_id = user_data.get("ad_restaurant_id")
+        ad_text = user_data.get("ad_text", "")
+        media_file_id = user_data.get("ad_media_file_id", "")
+        media_type = user_data.get("ad_media_type", "")
+
+        # حساب وقت انتهاء الإعلان (7 أيام من الآن)
+        expire_timestamp = int(time.time()) + (7 * 24 * 60 * 60)
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO ads (city_id, restaurant_id, ad_text, media_file_id, media_type, expire_timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (city_id, restaurant_id, ad_text, media_file_id, media_type, expire_timestamp))
+            await conn.commit()
+
+        return True
+    except Exception as e:
+        logging.error(f"خطأ في save_ad_to_database: {e}")
+        return False
+
+
 async def manage_restaurants(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
 
         async with get_db_connection() as conn:
-
-            async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
-                provinces = [row[0] async for row in cursor]
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM provinces ORDER BY name")
+                provinces_data = await cursor.fetchall()
+                provinces = [row[0] for row in provinces_data]
 
         if not provinces:
             await query.edit_message_text("❌ لا توجد محافظات مسجلة.")
@@ -1056,6 +1051,8 @@ async def manage_restaurants(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logging.error(f"خطأ في manage_restaurants: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء عرض المحافظات.")
 
+
+
 async def handle_province_for_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -1065,15 +1062,52 @@ async def handle_province_for_restaurant(update: Update, context: ContextTypes.D
         context.user_data["selected_province_restaurant"] = province
 
         async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT cities.name FROM cities
+                    JOIN provinces ON cities.province_id = provinces.id
+                    WHERE provinces.name = %s
+                    GROUP BY cities.name
+                    ORDER BY cities.name
+                """, (province,))
+                cities_data = await cursor.fetchall()
+                cities = [row[0] for row in cities_data]
 
-            async with conn.execute("""
-                SELECT cities.name FROM cities
-                JOIN provinces ON cities.province_id = provinces.id
-                WHERE provinces.name = ?
-                GROUP BY cities.name
-                ORDER BY cities.name
-            """, (province,)) as cursor:
-                cities = [row[0] async for row in cursor]
+        if not cities:
+            await query.edit_message_text("❌ لا توجد مدن مسجلة ضمن هذه المحافظة.")
+            return
+
+        keyboard = [
+            [InlineKeyboardButton(city, callback_data=f"select_city_for_restaurant_{city}")]
+            for city in cities
+        ]
+        await query.edit_message_text(
+            f"🌆 اختر المدينة ضمن المحافظة ({province}) لإدارة مطاعمها:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logging.error(f"خطأ في handle_province_for_restaurant: {e}")
+        await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المدن.")
+
+async def handle_province_for_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        province = query.data.split("select_province_for_restaurant_")[1]
+        context.user_data["selected_province_restaurant"] = province
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT cities.name FROM cities
+                    JOIN provinces ON cities.province_id = provinces.id
+                    WHERE provinces.name = %s
+                    GROUP BY cities.name
+                    ORDER BY cities.name
+                """, (province,))
+                cities_data = await cursor.fetchall()
+                cities = [row[0] for row in cities_data]
 
         if not cities:
             await query.edit_message_text("❌ لا توجد مدن مسجلة ضمن هذه المحافظة.")
@@ -1118,7 +1152,6 @@ async def handle_city_for_restaurant(update: Update, context: ContextTypes.DEFAU
         logging.error(f"خطأ في handle_city_for_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء إعداد قائمة المطاعم.")
 
-
 async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -1130,16 +1163,17 @@ async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_
             return
 
         async with get_db_connection() as conn:
-
-            async with conn.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM cities WHERE name = %s", (city_name,))
                 result = await cursor.fetchone()
                 if not result:
                     await query.edit_message_text("❌ لم يتم العثور على المدينة.")
                     return
                 city_id = result[0]
 
-            async with conn.execute("SELECT name FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
-                restaurants = [row[0] async for row in cursor]
+                await cursor.execute("SELECT name FROM restaurants WHERE city_id = %s", (city_id,))
+                restaurants_data = await cursor.fetchall()
+                restaurants = [row[0] for row in restaurants_data]
 
         if not restaurants:
             await query.edit_message_text("❌ لا توجد مطاعم في هذه المدينة.")
@@ -1158,7 +1192,6 @@ async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logging.error(f"خطأ في start_rename_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
-
 async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -1170,13 +1203,14 @@ async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_
             return
 
         async with get_db_connection() as conn:
-
-            async with conn.execute("""
-                SELECT r.name FROM restaurants r
-                JOIN cities c ON r.city_id = c.id
-                WHERE c.name = ?
-            """, (city,)) as cursor:
-                restaurants = [row[0] async for row in cursor]
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT r.name FROM restaurants r
+                    JOIN cities c ON r.city_id = c.id
+                    WHERE c.name = %s
+                """, (city,))
+                restaurants_data = await cursor.fetchall()
+                restaurants = [row[0] for row in restaurants_data]
 
         if not restaurants:
             await query.edit_message_text("❌ لا توجد مطاعم في هذه المدينة.")
@@ -1218,21 +1252,30 @@ async def confirm_delete_restaurant(update: Update, context: ContextTypes.DEFAUL
         restaurant_name = query.data.split("confirm_delete_restaurant_")[1]
 
         async with get_db_connection() as conn:
+            # الحصول على معرف المطعم
+            async with conn.execute("SELECT id FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
+                result = await cursor.fetchone()
+                if not result:
+                    await query.edit_message_text("❌ لم يتم العثور على المطعم.")
+                    return
+                restaurant_id = result[0]
 
+            # حذف الوجبات المرتبطة بفئات المطعم
             await conn.execute("""
                 DELETE FROM meals WHERE category_id IN (
-                    SELECT id FROM categories WHERE restaurant_id = (
-                        SELECT id FROM restaurants WHERE name = ?
-                    )
+                    SELECT id FROM categories WHERE restaurant_id = ?
                 )
-            """, (restaurant_name,))
-            await conn.execute("""
-                DELETE FROM categories WHERE restaurant_id = (
-                    SELECT id FROM restaurants WHERE name = ?
-                )
-            """, (restaurant_name,))
-            await conn.execute("DELETE FROM restaurant_ratings WHERE restaurant = ?", (restaurant_name,))
-            await conn.execute("DELETE FROM restaurants WHERE name = ?", (restaurant_name,))
+            """, (restaurant_id,))
+
+            # حذف فئات المطعم
+            await conn.execute("DELETE FROM categories WHERE restaurant_id = ?", (restaurant_id,))
+
+            # حذف تقييمات المطعم
+            await conn.execute("DELETE FROM restaurant_ratings WHERE restaurant_id = ?", (restaurant_id,))
+
+            # حذف المطعم نفسه
+            await conn.execute("DELETE FROM restaurants WHERE id = ?", (restaurant_id,))
+
             await conn.commit()
 
         await query.edit_message_text(f"🗑️ تم حذف المطعم '{restaurant_name}' وكل محتوياته.")
@@ -1240,6 +1283,7 @@ async def confirm_delete_restaurant(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logging.error(f"خطأ في confirm_delete_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء حذف المطعم.")
+
 
 async def handle_add_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -1253,6 +1297,7 @@ async def handle_add_delete_restaurant(update: Update, context: ContextTypes.DEF
     except Exception as e:
         logging.error(f"خطأ في handle_add_delete_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء اختيار العملية.")
+
 
 
 async def handle_restaurant_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1322,7 +1367,6 @@ async def handle_selected_restaurant_edit(update: Update, context: ContextTypes.
         logging.error(f"خطأ في handle_selected_restaurant_edit: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء اختيار المطعم.")
 
-
 async def handle_restaurant_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         name = update.message.text.strip()
@@ -1340,19 +1384,33 @@ async def handle_restaurant_name(update: Update, context: ContextTypes.DEFAULT_T
 
         elif action == "delete_restaurant":
             async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT id FROM restaurants WHERE name = %s", (name,))
+                    result = await cursor.fetchone()
+                    if not result:
+                        await update.message.reply_text("❌ لم يتم العثور على المطعم.")
+                        context.user_data.clear()
+                        return ConversationHandler.END
+                    restaurant_id = result[0]
 
-                await conn.execute("DELETE FROM restaurants WHERE name = ?", (name,))
-                await conn.execute("DELETE FROM restaurant_ratings WHERE restaurant = ?", (name,))
-                await conn.commit()
+                    await cursor.execute("""
+                        DELETE FROM meals WHERE category_id IN (
+                            SELECT id FROM categories WHERE restaurant_id = %s
+                        )
+                    """, (restaurant_id,))
+                    await cursor.execute("DELETE FROM categories WHERE restaurant_id = %s", (restaurant_id,))
+                    await cursor.execute("DELETE FROM restaurants WHERE id = %s", (restaurant_id,))
+                    await conn.commit()
 
             await update.message.reply_text(f"🗑️ تم حذف المطعم '{name}' وكل ما يتعلق به.")
             context.user_data.clear()
             return ConversationHandler.END
+
     except Exception as e:
         logging.error(f"خطأ في handle_restaurant_name: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء معالجة اسم المطعم.")
+        await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ العملية.")
+        context.user_data.clear()
         return ConversationHandler.END
-
 
 
 async def handle_restaurant_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1368,7 +1426,6 @@ async def handle_restaurant_channel(update: Update, context: ContextTypes.DEFAUL
     )
     return "ASK_OPEN_HOUR"
 
-
 async def handle_open_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         open_hour = float(update.message.text.strip())
@@ -1381,9 +1438,6 @@ async def handle_open_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["open_hour"] = open_hour
     await update.message.reply_text("⏰ أرسل وقت *الإغلاق* (مثال: 23 أو 22.5):", parse_mode="Markdown")
     return "ASK_CLOSE_HOUR"
-
-
-
 async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         close_hour = float(update.message.text.strip())
@@ -1406,20 +1460,20 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         async with get_db_connection() as conn:
-
-            async with conn.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM cities WHERE name = %s", (city_name,))
                 result = await cursor.fetchone()
 
-            if not result:
-                await update.message.reply_text("❌ لم يتم العثور على المدينة.")
-                return ConversationHandler.END
+                if not result:
+                    await update.message.reply_text("❌ لم يتم العثور على المدينة.")
+                    return ConversationHandler.END
 
-            city_id = result[0]
-            await conn.execute("""
-                INSERT INTO restaurants (name, city_id, channel, open_hour, close_hour)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, city_id, channel, open_hour, close_hour))
-            await conn.commit()
+                city_id = result[0]
+                await cursor.execute("""
+                    INSERT INTO restaurants (name, city_id, channel, open_hour, close_hour)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (name, city_id, channel, open_hour, close_hour))
+                await conn.commit()
 
         await update.message.reply_text(f"✅ تم إضافة المطعم '{name}' بنجاح.")
         context.user_data.clear()
@@ -1430,7 +1484,6 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"خطأ في handle_close_hour: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء حفظ بيانات المطعم.")
         return ConversationHandler.END
-
 
 async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -1564,7 +1617,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 """, (new_name, old_name, category_name, restaurant_name))
                 await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم الوجبة إلى: {new_name}")
-        except aiosqlite.IntegrityError:
+        except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ هناك وجبة بهذا الاسم موجودة مسبقًا.")
         except Exception as e:
             logging.error(f"خطأ في تعديل اسم الوجبة: {e}")
@@ -1902,7 +1955,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     )
                     await conn.commit()
                     await update.message.reply_text(f"✅ تم إضافة الفئة: {category_name}")
-                except aiosqlite.IntegrityError:
+                except pymysql.err.IntegrityError:
                     await update.message.reply_text("⚠️ هذه الفئة موجودة بالفعل لهذا المطعم.")
 
         except Exception as e:
@@ -1959,7 +2012,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 """, (new_name, old_name, restaurant_name))
                 await conn.commit()
             await update.message.reply_text(f"✏️ تم تعديل اسم الفئة إلى: {new_name}")
-        except aiosqlite.IntegrityError:
+        except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ توجد فئة بهذا الاسم مسبقًا.")
         except Exception as e:
             logging.error(f"❌ خطأ أثناء تعديل اسم الفئة: {e}")
@@ -1982,7 +2035,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await conn.execute("UPDATE user_orders SET restaurant = ? WHERE restaurant = ?", (new_name, old_name))
                 await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم المطعم إلى: {new_name}")
-        except aiosqlite.IntegrityError:
+        except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ يوجد مطعم بهذا الاسم مسبقًا.")
         except Exception as e:
             logging.error(f"❌ خطأ أثناء تعديل اسم المطعم: {e}")
@@ -2185,15 +2238,15 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logging.warning("⚠️ لم يتم تحديد نوع التعديل الصحيح.")
         await update.message.reply_text("❌ لا يمكن تحديد نوع التعديل. يرجى البدء من جديد.")
 
-
 async def manage_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     async with get_db_connection() as conn:
-
-        async with conn.execute("SELECT name FROM provinces ORDER BY name") as cursor:
-            provinces = [row[0] async for row in cursor]
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT name FROM provinces ORDER BY name")
+            provinces_data = await cursor.fetchall()
+            provinces = [row[0] for row in provinces_data]
 
     if not provinces:
         await query.edit_message_text("❌ لا توجد محافظات مسجلة.")
@@ -2208,7 +2261,6 @@ async def manage_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
 async def handle_province_for_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2217,14 +2269,15 @@ async def handle_province_for_category(update: Update, context: ContextTypes.DEF
     context.user_data["selected_province_category"] = province
 
     async with get_db_connection() as conn:
-
-        async with conn.execute("""
-            SELECT cities.name FROM cities
-            JOIN provinces ON cities.province_id = provinces.id
-            WHERE provinces.name = ?
-            ORDER BY cities.name
-        """, (province,)) as cursor:
-            cities = [row[0] async for row in cursor]
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT cities.name FROM cities
+                JOIN provinces ON cities.province_id = provinces.id
+                WHERE provinces.name = %s
+                ORDER BY cities.name
+            """, (province,))
+            cities_data = await cursor.fetchall()
+            cities = [row[0] for row in cities_data]
 
     if not cities:
         await query.edit_message_text("❌ لا توجد مدن مسجلة ضمن هذه المحافظة.")
@@ -2239,7 +2292,6 @@ async def handle_province_for_category(update: Update, context: ContextTypes.DEF
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
 async def handle_city_for_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2248,13 +2300,14 @@ async def handle_city_for_category(update: Update, context: ContextTypes.DEFAULT
     context.user_data["selected_city_category"] = city
 
     async with get_db_connection() as conn:
-
-        async with conn.execute("""
-            SELECT r.name FROM restaurants r
-            JOIN cities c ON r.city_id = c.id
-            WHERE c.name = ?
-        """, (city,)) as cursor:
-            restaurants = [row[0] async for row in cursor]
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT r.name FROM restaurants r
+                JOIN cities c ON r.city_id = c.id
+                WHERE c.name = %s
+            """, (city,))
+            restaurants_data = await cursor.fetchall()
+            restaurants = [row[0] for row in restaurants_data]
 
     if not restaurants:
         await query.edit_message_text("❌ لا توجد مطاعم مسجلة ضمن هذه المدينة.")
@@ -2268,7 +2321,6 @@ async def handle_city_for_category(update: Update, context: ContextTypes.DEFAULT
         f"🏪 اختر المطعم الذي تريد إدارة فئاته في المدينة ({city}):",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 
 
@@ -2297,6 +2349,7 @@ async def show_category_options(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+
 async def handle_category_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2309,13 +2362,15 @@ async def handle_category_action(update: Update, context: ContextTypes.DEFAULT_T
 
     elif action == "delete_category":
         try:
-            async with aiosqlite.connect(DB_PATH) as conn:
-                cursor = await conn.execute("""
-                    SELECT id, name FROM categories
-                    WHERE restaurant_id = (SELECT id FROM restaurants WHERE name = ?)
-                    ORDER BY name
-                """, (restaurant,))
-                categories = await cursor.fetchall()
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT c.id, c.name FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE r.name = %s
+                        ORDER BY c.name
+                    """, (restaurant,))
+                    categories = await cursor.fetchall()
 
             if not categories:
                 await query.edit_message_text("❌ لا توجد فئات لحذفها.")
@@ -2328,18 +2383,20 @@ async def handle_category_action(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("🗑️ اختر الفئة التي تريد حذفها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
         except Exception as e:
-            print(f"❌ خطأ أثناء جلب الفئات للحذف: {e}")
+            logging.error(f"❌ خطأ أثناء جلب الفئات للحذف: {e}")
             await query.edit_message_text("❌ حدث خطأ أثناء تحميل الفئات.")
 
     elif action == "edit_category_name":
         try:
-            async with aiosqlite.connect(DB_PATH) as conn:
-                cursor = await conn.execute("""
-                    SELECT id, name FROM categories
-                    WHERE restaurant_id = (SELECT id FROM restaurants WHERE name = ?)
-                    ORDER BY name
-                """, (restaurant,))
-                categories = await cursor.fetchall()
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT c.id, c.name FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE r.name = %s
+                        ORDER BY c.name
+                    """, (restaurant,))
+                    categories = await cursor.fetchall()
 
             if not categories:
                 await query.edit_message_text("❌ لا توجد فئات مسجلة لهذا المطعم.")
@@ -2352,7 +2409,7 @@ async def handle_category_action(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("✏️ اختر الفئة التي تريد تعديل اسمها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
         except Exception as e:
-            print(f"❌ خطأ أثناء جلب الفئات للتعديل: {e}")
+            logging.error(f"❌ خطأ أثناء جلب الفئات للتعديل: {e}")
             await query.edit_message_text("❌ حدث خطأ أثناء تحميل الفئات.")
 
     elif action == "go_main_menu":
@@ -2381,26 +2438,26 @@ async def delete_selected_category(update: Update, context: ContextTypes.DEFAULT
         return
 
     try:
-        async with aiosqlite.connect(DB_PATH) as conn:
-            cursor = await conn.execute("SELECT name FROM categories WHERE id = ?", (category_id,))
-            result = await cursor.fetchone()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM categories WHERE id = %s", (category_id,))
+                result = await cursor.fetchone()
 
-            if not result:
-                await query.edit_message_text("❌ لم يتم العثور على الفئة.")
-                return
+                if not result:
+                    await query.edit_message_text("❌ لم يتم العثور على الفئة.")
+                    return
 
-            category_name = result[0]
+                category_name = result[0]
 
-            await conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-            await conn.commit()
+                await cursor.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+                await conn.commit()
 
         await query.edit_message_text(f"🗑️ تم حذف الفئة: {category_name}")
         return await show_category_options(update, context)
 
     except Exception as e:
-        print(f"❌ خطأ أثناء حذف الفئة: {e}")
+        logging.error(f"❌ خطأ أثناء حذف الفئة: {e}")
         await query.edit_message_text("❌ حدث خطأ أثناء حذف الفئة.")
-
 
 
 async def manage_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2408,9 +2465,10 @@ async def manage_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("SELECT name FROM provinces ORDER BY name")
-            provinces = [row[0] async for row in cursor]
+        async with get_db_connection() as db:
+            async with db.cursor() as cursor:
+                await cursor.execute("SELECT name FROM provinces ORDER BY name")
+                provinces = [row[0] for row in await cursor.fetchall()]
     except Exception:
         await query.edit_message_text("❌ حدث خطأ أثناء جلب المحافظات.")
         return
@@ -2431,7 +2489,6 @@ async def manage_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-
 async def handle_province_for_meals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2439,14 +2496,15 @@ async def handle_province_for_meals(update: Update, context: ContextTypes.DEFAUL
     context.user_data["selected_province_meal"] = province
 
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("""
-                SELECT cities.name FROM cities
-                JOIN provinces ON cities.province_id = provinces.id
-                WHERE provinces.name = ?
-                ORDER BY cities.name
-            """, (province,))
-            cities = [row[0] async for row in cursor]
+        async with get_db_connection() as db:
+            async with db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT cities.name FROM cities
+                    JOIN provinces ON cities.province_id = provinces.id
+                    WHERE provinces.name = %s
+                    ORDER BY cities.name
+                """, (province,))
+                cities = [row[0] for row in await cursor.fetchall()]
     except Exception:
         await query.edit_message_text("❌ خطأ أثناء جلب المدن.")
         return
@@ -2474,15 +2532,17 @@ async def handle_city_for_meals(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["selected_city_meal"] = city
 
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("SELECT id FROM cities WHERE name = ?", (city,))
-            city_row = await cursor.fetchone()
-            if not city_row:
-                await query.edit_message_text("❌ لم يتم العثور على المدينة.")
-                return
-            city_id = city_row[0]
-            cursor = await db.execute("SELECT name FROM restaurants WHERE city_id = ?", (city_id,))
-            restaurants = [row[0] async for row in cursor]
+        async with get_db_connection() as db:
+            async with db.cursor() as cursor:
+                await cursor.execute("SELECT id FROM cities WHERE name = %s", (city,))
+                city_row = await cursor.fetchone()
+                if not city_row:
+                    await query.edit_message_text("❌ لم يتم العثور على المدينة.")
+                    return
+                city_id = city_row[0]
+
+                await cursor.execute("SELECT name FROM restaurants WHERE city_id = %s", (city_id,))
+                restaurants = [row[0] for row in await cursor.fetchall()]
     except Exception:
         await query.edit_message_text("❌ خطأ أثناء جلب المطاعم.")
         return
@@ -2510,17 +2570,18 @@ async def handle_restaurant_for_meals(update: Update, context: ContextTypes.DEFA
     context.user_data["selected_restaurant_meal"] = restaurant
 
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("SELECT id FROM restaurants WHERE name = ?", (restaurant,))
-            row = await cursor.fetchone()
-            if not row:
-                await query.edit_message_text("❌ لم يتم العثور على المطعم.")
-                return
-            restaurant_id = row[0]
-            context.user_data["selected_restaurant_id"] = restaurant_id
+        async with get_db_connection() as db:
+            async with db.cursor() as cursor:
+                await cursor.execute("SELECT id FROM restaurants WHERE name = %s", (restaurant,))
+                row = await cursor.fetchone()
+                if not row:
+                    await query.edit_message_text("❌ لم يتم العثور على المطعم.")
+                    return
+                restaurant_id = row[0]
+                context.user_data["selected_restaurant_id"] = restaurant_id
 
-            cursor = await db.execute("SELECT name FROM categories WHERE restaurant_id = ?", (restaurant_id,))
-            categories = [row[0] async for row in cursor]
+                await cursor.execute("SELECT name FROM categories WHERE restaurant_id = %s", (restaurant_id,))
+                categories = [row[0] for row in await cursor.fetchall()]
     except Exception:
         await query.edit_message_text("❌ خطأ أثناء جلب الفئات.")
         return
@@ -2628,14 +2689,15 @@ async def start_delete_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            cursor = await db.execute("""
-                SELECT m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category_name, restaurant_name))
-            meals = await cursor.fetchall()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category_name, restaurant_name))
+                meals = await cursor.fetchall()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ في جلب الوجبات: {e}")
         return
@@ -2650,6 +2712,7 @@ async def start_delete_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
     await query.edit_message_text("❌ اختر الوجبة التي تريد حذفها:", reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 
 # ⬇️ استقبال صورة الوجبة الجديدة أثناء الإضافة
@@ -2672,41 +2735,39 @@ async def handle_add_meal_image(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["meal_unique_id"] = unique_id
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            cursor = await db.execute("SELECT id FROM categories WHERE name = ? AND restaurant_id = ?", (category_name, restaurant_id))
-            result = await cursor.fetchone()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM categories WHERE name = %s AND restaurant_id = %s", (category_name, restaurant_id))
+                result = await cursor.fetchone()
 
-            if not result:
-                await update.message.reply_text("⚠️ تعذر تحديد الفئة. حاول مجددًا.")
-                return
+                if not result:
+                    await update.message.reply_text("⚠️ تعذر تحديد الفئة. حاول مجددًا.")
+                    return
 
-            category_id = result[0]
+                category_id = result[0]
 
-            if has_sizes == "لا، لا يوجد قياسات":
-                price = context.user_data.get("new_meal_price")
-                sizes_json = None
-            else:
-                size_data = context.user_data.get("sizes_data", [])
-                sizes_json = json.dumps([{"name": s[0], "price": s[1]} for s in size_data], ensure_ascii=False)
-                price = None
+                if has_sizes == "لا، لا يوجد قياسات":
+                    price = context.user_data.get("new_meal_price")
+                    sizes_json = None
+                else:
+                    size_data = context.user_data.get("sizes_data", [])
+                    sizes_json = json.dumps([{"name": s[0], "price": s[1]} for s in size_data], ensure_ascii=False)
+                    price = None
 
-            try:
-                sent_message = await context.bot.send_photo(
-                    chat_id=ADMIN_MEDIA_CHANNEL,
-                    photo=photo_file_id
-                )
-                image_message_id = sent_message.message_id
-            except Exception as e:
-                await update.message.reply_text(f"❌ فشل إرسال الصورة للقناة: {e}")
-                return
+                try:
+                    sent_message = await context.bot.send_photo(chat_id=ADMIN_MEDIA_CHANNEL, photo=photo_file_id)
+                    image_message_id = sent_message.message_id
+                except Exception as e:
+                    await update.message.reply_text(f"❌ فشل إرسال الصورة للقناة: {e}")
+                    return
 
-            await db.execute("""
-                INSERT INTO meals (name, price, category_id, caption, image_file_id, size_options, unique_id, image_message_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (meal_name, price, category_id, caption, photo_file_id, sizes_json, unique_id, image_message_id))
-            await db.commit()
+                await cursor.execute("""
+                    INSERT INTO meals (name, price, category_id, caption, image_file_id, size_options, unique_id, image_message_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (meal_name, price, category_id, caption, photo_file_id, sizes_json, unique_id, image_message_id))
+                await conn.commit()
 
-            await update.message.reply_text(f"✅ تم حفظ الوجبة '{meal_name}' بنجاح مع الصورة.")
+                await update.message.reply_text(f"✅ تم حفظ الوجبة '{meal_name}' بنجاح مع الصورة.")
 
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء حفظ الوجبة: {str(e)}")
@@ -2717,6 +2778,7 @@ async def handle_add_meal_image(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.update(preserved)
 
     await show_meal_options(update, context)
+
 
 
 # ⬇️ تعديل صورة الوجبة
@@ -2731,38 +2793,40 @@ async def handle_new_meal_photo(update: Update, context: ContextTypes.DEFAULT_TY
     meal_id = context.user_data.get("meal_to_edit_photo")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            cursor = await db.execute("SELECT unique_id, image_message_id FROM meals WHERE id = ?", (meal_id,))
-            result = await cursor.fetchone()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT unique_id, image_message_id FROM meals WHERE id = %s", (meal_id,))
+                result = await cursor.fetchone()
 
-            if not result:
-                await update.message.reply_text("❌ لم يتم العثور على الوجبة.")
-                return
+                if not result:
+                    await update.message.reply_text("❌ لم يتم العثور على الوجبة.")
+                    return
 
-            unique_id, _ = result
+                unique_id, _ = result
+                new_photo = update.message.photo[-1].file_id
+                sent = await context.bot.send_photo(
+                    chat_id=ADMIN_MEDIA_CHANNEL,
+                    photo=new_photo,
+                    caption=f"[{unique_id}]"
+                )
+                new_message_id = sent.message_id
 
-            new_photo = update.message.photo[-1].file_id
-            sent = await context.bot.send_photo(
-                chat_id=ADMIN_MEDIA_CHANNEL,
-                photo=new_photo,
-                caption=f"[{unique_id}]"
-            )
-            new_message_id = sent.message_id
+                await cursor.execute("""
+                    UPDATE meals
+                    SET image_file_id = %s, image_message_id = %s
+                    WHERE id = %s
+                """, (new_photo, new_message_id, meal_id))
+                await conn.commit()
 
-            await db.execute("UPDATE meals SET image_file_id = ?, image_message_id = ? WHERE id = ?", (
-                new_photo, new_message_id, meal_id
-            ))
-            await db.commit()
-
-            await update.message.reply_text("✅ تم تحديث صورة الوجبة بنجاح.")
+                await update.message.reply_text("✅ تم تحديث صورة الوجبة بنجاح.")
 
     except Exception as e:
         await update.message.reply_text(f"❌ فشل تعديل الصورة: {e}")
 
     context.user_data.pop("meal_action", None)
     context.user_data.pop("meal_to_edit_photo", None)
-
     return await show_meal_management_menu(update, context)
+
 
 
 # أدوات توليد النصوص والأزرار للإعلانات
@@ -2782,6 +2846,48 @@ def generate_ad_button(ad_restaurant):
     restaurant_encoded = quote(ad_restaurant)
     url = f"https://t.me/Fasterone1200_bot?start=go_{restaurant_encoded}"
     return InlineKeyboardMarkup([[InlineKeyboardButton("🍽️ اطلب عالسريع 🍽️", url=url)]])
+
+
+async def start_edit_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    category_name = context.user_data.get("selected_category_meal")
+    restaurant_name = context.user_data.get("selected_restaurant_meal")
+
+    if not category_name or not restaurant_name:
+        await query.edit_message_text("⚠️ لم يتم تحديد الفئة أو المطعم.")
+        return
+
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category_name, restaurant_name))
+                meals = [row[0] async for row in cursor]
+
+    except Exception as e:
+        await query.edit_message_text(f"❌ خطأ في قاعدة البيانات: {e}")
+        return
+
+    if not meals:
+        await query.edit_message_text("❌ لا توجد وجبات ضمن هذه الفئة.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(meal, callback_data=f"select_meal_to_rename_{meal}")]
+        for meal in meals
+    ]
+    keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
+
+    await query.edit_message_text(
+        "✏️ اختر الوجبة التي تريد تعديل اسمها:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def handle_all_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2804,12 +2910,13 @@ async def handle_all_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
         button = generate_ad_button(ad_restaurant) if not skip_restaurant else None
 
         try:
-            async with aiosqlite.connect("database.db") as db:
-                if ad_city == "all":
-                    async with db.execute("SELECT ads_channel FROM cities WHERE ads_channel IS NOT NULL") as cursor:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    if ad_city == "all":
+                        await cursor.execute("SELECT ads_channel FROM cities WHERE ads_channel IS NOT NULL")
                         channels = [row[0] async for row in cursor]
-                else:
-                    async with db.execute("SELECT ads_channel FROM cities WHERE name = ?", (ad_city,)) as cursor:
+                    else:
+                        await cursor.execute("SELECT ads_channel FROM cities WHERE name = %s", (ad_city,))
                         result = await cursor.fetchone()
                         if not result or not result[0]:
                             await update.message.reply_text("❌ لم يتم العثور على قناة المدينة.")
@@ -2841,7 +2948,7 @@ async def handle_all_images(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return await start(update, context)
 
-    # إذا لم يكن إعلانًا
+    # في حال لم يكن سياق إعلان
     step = context.user_data.get("add_meal_step")
     action = context.user_data.get("meal_action")
     if action == "edit_photo":
@@ -2863,8 +2970,9 @@ async def handle_ad_media_group(update: Update, context: ContextTypes.DEFAULT_TY
     skip_restaurant = context.user_data.get("ad_skip_restaurant", False)
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT ads_channel FROM cities WHERE name = ?", (ad_city,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT ads_channel FROM cities WHERE name = %s", (ad_city,))
                 result = await cursor.fetchone()
                 if not result or not result[0]:
                     await update.message.reply_text("❌ لم يتم العثور على قناة المدينة.")
@@ -2899,7 +3007,6 @@ async def handle_ad_media_group(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("✅ تم إرسال الإعلان كمجموعة وسائط.")
     return await start(update, context)
 
-
 async def start_edit_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -2912,14 +3019,16 @@ async def start_edit_meal_name(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category_name, restaurant_name)) as cursor:
-                meals = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category_name, restaurant_name))
+                rows = await cursor.fetchall()
+                meals = [row[0] for row in rows]
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ في قاعدة البيانات: {e}")
         return
@@ -2934,11 +3043,7 @@ async def start_edit_meal_name(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
 
-    await query.edit_message_text(
-        "✏️ اختر الوجبة التي تريد تعديل اسمها:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
+    await query.edit_message_text("✏️ اختر الوجبة التي تريد تعديل اسمها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def ask_new_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2949,7 +3054,6 @@ async def ask_new_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["old_meal_name"] = old_meal_name
 
     await query.edit_message_text(f"📝 أرسل الاسم الجديد للوجبة: {old_meal_name}")
-
 
 
 async def confirm_delete_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2965,16 +3069,17 @@ async def confirm_delete_meal(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            await db.execute("""
-                DELETE FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category_name, restaurant_name))
-            await db.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    DELETE FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category_name, restaurant_name))
+                await conn.commit()
     except Exception as e:
         await query.edit_message_text(f"❌ فشل الحذف: {e}")
         return
@@ -2996,13 +3101,14 @@ async def start_edit_meal_price(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category, restaurant))
                 rows = await cursor.fetchall()
                 meals = [row[0] for row in rows]
     except Exception as e:
@@ -3016,11 +3122,7 @@ async def start_edit_meal_price(update: Update, context: ContextTypes.DEFAULT_TY
     keyboard = [[InlineKeyboardButton(meal, callback_data=f"select_meal_to_edit_price_{meal}")] for meal in meals]
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
 
-    await query.edit_message_text(
-        "💰 اختر الوجبة التي تريد تعديل سعرها:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
+    await query.edit_message_text("💰 اختر الوجبة التي تريد تعديل سعرها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 
@@ -3035,15 +3137,16 @@ async def ask_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options, price FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options, price FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ في قاعدة البيانات: {e}")
@@ -3075,7 +3178,6 @@ async def ask_new_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-
 async def ask_price_for_each_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3088,15 +3190,16 @@ async def ask_price_for_each_size(update: Update, context: ContextTypes.DEFAULT_
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء قراءة القياسات: {e}")
@@ -3127,6 +3230,7 @@ async def ask_price_for_each_size(update: Update, context: ContextTypes.DEFAULT_
         )
 
 
+
 async def handle_edit_price_step_by_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("edit_step")
     text = update.message.text.strip()
@@ -3140,52 +3244,56 @@ async def handle_edit_price_step_by_step(update: Update, context: ContextTypes.D
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            if step == "single_price":
-                price = int(text)
-                await db.execute("""
-                    UPDATE meals SET price = ?, size_options = NULL
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (price, meal, category, restaurant))
-                await db.commit()
-                await update.message.reply_text("✅ تم تعديل السعر بنجاح.")
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                if step == "single_price":
+                    price = int(text)
+                    await cursor.execute("""
+                        UPDATE meals SET price = %s, size_options = NULL
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (price, meal, category, restaurant))
+                    await update.message.reply_text("✅ تم تعديل السعر بنجاح.")
 
-            elif step == "multi_price":
-                sizes = context.user_data["sizes_list"]
-                index = len(context.user_data["price_sizes"])
+                elif step == "multi_price":
+                    sizes = context.user_data["sizes_list"]
+                    index = len(context.user_data["price_sizes"])
 
-                size, _ = sizes[index].split("/")
-                context.user_data["price_sizes"][size] = int(text)
+                    current_size = sizes[index]
+                    size_name = current_size["name"]
+                    context.user_data["price_sizes"][size_name] = int(text)
 
-                if index + 1 < len(sizes):
-                    next_size, next_price = sizes[index + 1].split("/")
-                    await update.message.reply_text(
-                        f"💬 أرسل السعر الجديد للقياس: {next_size} (الحالي {next_price} ل.س)"
-                    )
-                    return  # ❗لا تتابع الحذف والتنظيف الآن
+                    if index + 1 < len(sizes):
+                        next_size = sizes[index + 1]
+                        await update.message.reply_text(
+                            f"💬 أرسل السعر الجديد للقياس: {next_size['name']} (الحالي {next_size['price']} ل.س)"
+                        )
+                        return  # ❗ لا تتابع الحذف والتنظيف الآن
 
-                # إذا تم إدخال كل الأسعار
-                updated_sizes = [f"{s}/{p}" for s, p in context.user_data["price_sizes"].items()]
-                base_price = max(context.user_data["price_sizes"].values())
+                    # تم إدخال كل الأسعار
+                    updated_sizes = [
+                        {"name": s, "price": p} for s, p in context.user_data["price_sizes"].items()
+                    ]
+                    base_price = max(context.user_data["price_sizes"].values())
 
-                await db.execute("""
-                    UPDATE meals SET price = ?, size_options = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (
-                    base_price,
-                    json.dumps(updated_sizes, ensure_ascii=False),
-                    meal, category, restaurant
-                ))
-                await db.commit()
-                await update.message.reply_text("✅ تم تعديل الأسعار لجميع القياسات بنجاح.")
+                    await cursor.execute("""
+                        UPDATE meals SET price = %s, size_options = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (
+                        base_price,
+                        json.dumps(updated_sizes, ensure_ascii=False),
+                        meal, category, restaurant
+                    ))
+                    await update.message.reply_text("✅ تم تعديل الأسعار لجميع القياسات بنجاح.")
+
+            await conn.commit()
 
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء تعديل السعر: {e}")
@@ -3195,6 +3303,7 @@ async def handle_edit_price_step_by_step(update: Update, context: ContextTypes.D
         context.user_data.pop(key, None)
 
     await show_meal_management_menu(update, context)
+
 
 async def handle_edit_meal_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     step = context.user_data.get("edit_step")
@@ -3209,98 +3318,104 @@ async def handle_edit_meal_text_input(update: Update, context: ContextTypes.DEFA
     value = update.message.text.strip()
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            if step == "caption":
-                await db.execute("""
-                    UPDATE meals
-                    SET caption = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (value, meal_name, category_name, restaurant_name))
-                await update.message.reply_text("✅ تم تعديل الكابشن بنجاح.")
-
-            elif step == "sizes":
-                sizes = [s.strip() for s in value.split(",") if s.strip()]
-                await db.execute("""
-                    UPDATE meals
-                    SET size_options = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (json.dumps(sizes, ensure_ascii=False), meal_name, category_name, restaurant_name))
-                await update.message.reply_text("✅ تم تعديل القياسات بنجاح.")
-
-            elif step == "edit_price_single":
-                if not value.isdigit():
-                    await update.message.reply_text("❌ الرجاء إدخال رقم فقط.")
-                    return
-                new_price = int(value)
-                await db.execute("""
-                    UPDATE meals
-                    SET price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (new_price, meal_name, category_name, restaurant_name))
-                await update.message.reply_text("✅ تم تعديل السعر بنجاح.")
-
-            elif step == "edit_price_multiple":
-                try:
-                    size_price_pairs = [part.strip() for part in value.split(",")]
-                    sizes = context.user_data.get("current_sizes", [])
-                    prices_dict = {}
-
-                    for pair in size_price_pairs:
-                        if "/" not in pair:
-                            raise ValueError("صيغة غير صحيحة: استخدم قياس/سعر")
-                        size, price_str = pair.split("/")
-                        size = size.strip()
-                        price = int(price_str.strip())
-                        if size not in sizes:
-                            raise ValueError(f"القياس '{size}' غير موجود")
-                        prices_dict[size] = price
-
-                    max_price = max(prices_dict.values())
-                    await db.execute("""
-                        UPDATE meals
-                        SET price = ?, size_options = ?
-                        WHERE name = ? AND category_id = (
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                if step == "caption":
+                    await cursor.execute("""
+                        UPDATE meals SET caption = %s
+                        WHERE name = %s AND category_id = (
                             SELECT c.id FROM categories c
                             JOIN restaurants r ON c.restaurant_id = r.id
-                            WHERE c.name = ? AND r.name = ?
+                            WHERE c.name = %s AND r.name = %s
                         )
-                    """, (
-                        max_price,
-                        json.dumps([f"{s}/{p}" for s, p in prices_dict.items()], ensure_ascii=False),
-                        meal_name,
-                        category_name,
-                        restaurant_name
-                    ))
-                    await update.message.reply_text("✅ تم تعديل أسعار القياسات بنجاح.")
+                    """, (value, meal_name, category_name, restaurant_name))
+                    await update.message.reply_text("✅ تم تعديل الكابشن بنجاح.")
 
-                except Exception as e:
-                    logger.error(f"خطأ في تعديل سعر وجبة متعددة القياسات: {e}")
-                    await update.message.reply_text("❌ حدث خطأ أثناء حفظ الأسعار. تأكد من التنسيق (مثال: صغير/2000, وسط/3000).")
-                    return
+                elif step == "sizes":
+                    sizes_raw = [s.strip() for s in value.split(",") if s.strip()]
+                    sizes = []
+                    for item in sizes_raw:
+                        if "/" in item:
+                            try:
+                                size_name, size_price = item.split("/", 1)
+                                sizes.append({"name": size_name.strip(), "price": int(size_price.strip())})
+                            except ValueError:
+                                continue
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (json.dumps(sizes, ensure_ascii=False), meal_name, category_name, restaurant_name))
+                    await update.message.reply_text("✅ تم تعديل القياسات بنجاح.")
 
-            await db.commit()
+                elif step == "edit_price_single":
+                    if not value.isdigit():
+                        await update.message.reply_text("❌ الرجاء إدخال رقم فقط.")
+                        return
+                    new_price = int(value)
+                    await cursor.execute("""
+                        UPDATE meals SET price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (new_price, meal_name, category_name, restaurant_name))
+                    await update.message.reply_text("✅ تم تعديل السعر بنجاح.")
+
+                elif step == "edit_price_multiple":
+                    try:
+                        size_price_pairs = [part.strip() for part in value.split(",")]
+                        sizes = context.user_data.get("current_sizes", [])
+                        prices_dict = {}
+
+                        for pair in size_price_pairs:
+                            if "/" not in pair:
+                                raise ValueError("صيغة غير صحيحة: استخدم قياس/سعر")
+                            size, price_str = pair.split("/")
+                            size = size.strip()
+                            price = int(price_str.strip())
+                            if not any(s["name"] == size for s in sizes):
+                                raise ValueError(f"القياس '{size}' غير موجود")
+                            prices_dict[size] = price
+
+                        max_price = max(prices_dict.values())
+                        updated_sizes = [{"name": s, "price": p} for s, p in prices_dict.items()]
+                        await cursor.execute("""
+                            UPDATE meals SET price = %s, size_options = %s
+                            WHERE name = %s AND category_id = (
+                                SELECT c.id FROM categories c
+                                JOIN restaurants r ON c.restaurant_id = r.id
+                                WHERE c.name = %s AND r.name = %s
+                            )
+                        """, (
+                            max_price,
+                            json.dumps(updated_sizes, ensure_ascii=False),
+                            meal_name,
+                            category_name,
+                            restaurant_name
+                        ))
+                        await update.message.reply_text("✅ تم تعديل أسعار القياسات بنجاح.")
+
+                    except Exception as e:
+                        logger.error(f"خطأ في تعديل سعر وجبة متعددة القياسات: {e}")
+                        await update.message.reply_text("❌ تأكد من التنسيق (مثال: صغير/2000, وسط/3000).")
+                        return
+
+            await conn.commit()
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء تعديل بيانات الوجبة: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء حفظ التعديلات.")
 
-    # تنظيف
     for key in ["edit_meal_name", "edit_step", "current_sizes", "current_price"]:
         context.user_data.pop(key, None)
 
     await show_meal_management_menu(update, context)
+
 
 
 async def handle_add_meal_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3376,7 +3491,6 @@ async def handle_add_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["new_meal_sizes"] = sizes
     await save_meal_to_database(update, context)
 
-
 async def save_meal_to_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = context.user_data.get("new_meal_name")
     price = context.user_data.get("new_meal_price")
@@ -3405,24 +3519,27 @@ async def save_meal_to_database(update: Update, context: ContextTypes.DEFAULT_TY
     save_price = price if not size_options else None
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT id FROM categories WHERE name = ?", (selected_category,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM categories WHERE name = %s", (selected_category,))
                 row = await cursor.fetchone()
-            if not row:
-                await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
-                return
-            category_id = row[0]
+                if not row:
+                    await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
+                    return
+                category_id = row[0]
 
-            try:
-                await db.execute("""
-                    INSERT INTO meals (name, price, category_id, caption, image_file_id, size_options)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (name, save_price, category_id, caption, image_id, size_options_json))
-                await db.commit()
-                await update.message.reply_text("✅ تم حفظ الوجبة بنجاح.")
-            except Exception as e:
-                logger.error(f"❌ خطأ أثناء الحفظ: {e}")
-                await update.message.reply_text("❌ حدث خطأ أثناء حفظ الوجبة. تأكد من أن الاسم غير مكرر.")
+                try:
+                    await cursor.execute("""
+                        INSERT INTO meals (name, price, category_id, caption, image_file_id, size_options)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (name, save_price, category_id, caption, image_id, size_options_json))
+                    await conn.commit()
+                    await update.message.reply_text("✅ تم حفظ الوجبة بنجاح.")
+                except pymysql.err.IntegrityError:
+                    await update.message.reply_text("❌ يوجد وجبة بنفس الاسم في هذه الفئة بالفعل.")
+                except Exception as e:
+                    logger.error(f"❌ خطأ أثناء الحفظ: {e}")
+                    await update.message.reply_text("❌ حدث خطأ أثناء حفظ الوجبة.")
 
     except Exception as db_err:
         logger.error(f"❌ مشكلة في الاتصال بقاعدة البيانات: {db_err}")
@@ -3432,6 +3549,7 @@ async def save_meal_to_database(update: Update, context: ContextTypes.DEFAULT_TY
     for key in list(context.user_data.keys()):
         if key.startswith("new_meal") or key == "add_meal_step":
             del context.user_data[key]
+
 
 
 
@@ -3456,7 +3574,6 @@ async def handle_add_meal_name_price_caption_image(update, context):
         context.user_data["add_meal_step"] = "awaiting_meal_image"
         await update.message.reply_text("📷 أرسل صورة للوجبة:")
 
-
 async def start_edit_meal_caption(update, context):
     query = update.callback_query
     await query.answer()
@@ -3468,13 +3585,14 @@ async def start_edit_meal_caption(update, context):
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.id, m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.id, m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category, restaurant))
                 meals = await cursor.fetchall()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ: {e}")
@@ -3486,7 +3604,6 @@ async def start_edit_meal_caption(update, context):
 
     keyboard = [[InlineKeyboardButton(name, callback_data=f"edit_caption_{meal_id}")] for meal_id, name in meals]
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
-
     await query.edit_message_text("✏️ اختر الوجبة التي تريد تعديل مكوناتها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
@@ -3498,14 +3615,16 @@ async def ask_new_meal_caption(update, context):
     context.user_data["meal_to_edit_caption_id"] = meal_id
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT name FROM meals WHERE id = ?", (meal_id,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM meals WHERE id = %s", (meal_id,))
                 result = await cursor.fetchone()
                 meal_name = result[0] if result else "غير معروف"
     except Exception as e:
         meal_name = "❌ خطأ أثناء تحميل الاسم"
 
     await query.edit_message_text(f"📝 أرسل المكونات أو الكابشن الجديد للوجبة: {meal_name}")
+
 
 
 async def start_edit_meal_photo(update, context):
@@ -3519,13 +3638,14 @@ async def start_edit_meal_photo(update, context):
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.id, m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.id, m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category, restaurant))
                 meals = await cursor.fetchall()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ: {e}")
@@ -3539,7 +3659,6 @@ async def start_edit_meal_photo(update, context):
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
     await query.edit_message_text("📸 اختر الوجبة لتعديل صورتها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
 async def start_edit_meal_sizes(update, context):
     query = update.callback_query
     await query.answer()
@@ -3547,13 +3666,14 @@ async def start_edit_meal_sizes(update, context):
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.name, m.size_options FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name, m.size_options FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category, restaurant))
                 meals = await cursor.fetchall()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ: {e}")
@@ -3571,7 +3691,6 @@ async def start_edit_meal_sizes(update, context):
     keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="show_meal_options_again")])
     await query.edit_message_text("📏 اختر وجبة لتعديل قياساتها:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
 async def ask_new_meal_photo(update, context):
     query = update.callback_query
     await query.answer()
@@ -3580,14 +3699,18 @@ async def ask_new_meal_photo(update, context):
     context.user_data["meal_to_edit_photo"] = meal_id
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT name FROM meals WHERE id = ?", (meal_id,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM meals WHERE id = %s", (meal_id,))
                 result = await cursor.fetchone()
                 meal_name = result[0] if result else "غير معروف"
     except Exception as e:
         meal_name = f"❌ خطأ: {e}"
 
     await query.edit_message_text(f"📸 الرجاء إرسال الصورة الجديدة للوجبة: {meal_name}")
+
+
+
 
 async def ask_edit_size_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -3601,15 +3724,16 @@ async def ask_edit_size_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
 
         if not result:
@@ -3638,6 +3762,8 @@ async def ask_edit_size_mode(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء جلب القياسات: {e}")
 
+
+
 async def ask_add_single_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3654,7 +3780,6 @@ async def ask_add_new_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
       "➕ أرسل القياس الجديد مع سعره بصيغة:\n\nاسم الحجم/السعر\n\nمثال: دبل/7000"
   )
     
-
 async def handle_add_new_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("edit_step") != "add_single_size":
         return
@@ -3677,34 +3802,35 @@ async def handle_add_new_size(update: Update, context: ContextTypes.DEFAULT_TYPE
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
 
-            sizes = json.loads(result[0]) if result and result[0] else []
+                sizes = json.loads(result[0]) if result and result[0] else []
 
-            if any(s.split("/")[0] == name for s in sizes):
-                await update.message.reply_text("⚠️ هذا القياس موجود مسبقًا.")
-                return
+                if any(s["name"] == name for s in sizes):
+                    await update.message.reply_text("⚠️ هذا القياس موجود مسبقًا.")
+                    return
 
-            sizes.append(f"{name}/{price}")
+                sizes.append({"name": name, "price": price})
 
-            await db.execute("""
-                UPDATE meals SET size_options = ?
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (json.dumps(sizes, ensure_ascii=False), meal_name, category, restaurant))
-            await db.commit()
+                await cursor.execute("""
+                    UPDATE meals SET size_options = %s
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (json.dumps(sizes, ensure_ascii=False), meal_name, category, restaurant))
+                await conn.commit()
 
         await update.message.reply_text("✅ تم إضافة القياس بنجاح.")
         context.user_data.pop("edit_step", None)
@@ -3713,6 +3839,7 @@ async def handle_add_new_size(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء تعديل القياسات: {e}")
+
 
 async def ask_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -3725,15 +3852,16 @@ async def ask_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE)
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
 
         if not result or not result[0]:
@@ -3755,8 +3883,10 @@ async def ask_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "ماذا تريد أن تفعل؟",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
+
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء جلب القياسات: {e}")
+
 
 
 async def handle_add_sizes_to_empty_meal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3785,20 +3915,21 @@ async def handle_add_sizes_to_empty_meal(update: Update, context: ContextTypes.D
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            await db.execute("""
-                UPDATE meals SET size_options = ?, price = ?
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (
-                json.dumps(formatted_sizes, ensure_ascii=False),
-                max(s["price"] for s in formatted_sizes),
-                meal_name, category, restaurant
-            ))
-            await db.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE meals SET size_options = %s, price = %s
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (
+                    json.dumps(formatted_sizes, ensure_ascii=False),
+                    max(s["price"] for s in formatted_sizes),
+                    meal_name, category, restaurant
+                ))
+                await conn.commit()
 
         await update.message.reply_text("✅ تم حفظ القياسات بنجاح.")
         context.user_data.pop("edit_step", None)
@@ -3807,6 +3938,7 @@ async def handle_add_sizes_to_empty_meal(update: Update, context: ContextTypes.D
 
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء حفظ القياسات: {e}")
+
 
 
 async def ask_which_size_to_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3818,15 +3950,16 @@ async def ask_which_size_to_remove(update: Update, context: ContextTypes.DEFAULT
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
 
         if not result or not result[0]:
@@ -3854,6 +3987,7 @@ async def ask_which_size_to_remove(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء جلب القياسات: {e}")
 
+
 async def handle_remove_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -3864,56 +3998,57 @@ async def handle_remove_size(update: Update, context: ContextTypes.DEFAULT_TYPE)
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT size_options FROM meals
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (meal_name, category, restaurant)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT size_options FROM meals
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (meal_name, category, restaurant))
                 result = await cursor.fetchone()
 
-            if not result or not result[0]:
-                await query.edit_message_text("❌ لا توجد قياسات لحذفها.")
-                return
+                if not result or not result[0]:
+                    await query.edit_message_text("❌ لا توجد قياسات لحذفها.")
+                    return
 
-            sizes = json.loads(result[0])
-            updated_sizes = [s for s in sizes if s["name"].strip() != size_to_remove.strip()]
+                sizes = json.loads(result[0])
+                updated_sizes = [s for s in sizes if s["name"].strip() != size_to_remove.strip()]
 
-            if len(updated_sizes) == len(sizes):
-                await query.edit_message_text("⚠️ لم يتم العثور على القياس المحدد.")
-                return
+                if len(updated_sizes) == len(sizes):
+                    await query.edit_message_text("⚠️ لم يتم العثور على القياس المحدد.")
+                    return
 
-            if len(updated_sizes) == 1:
-                new_price = updated_sizes[0]["price"]
-                await db.execute("""
-                    UPDATE meals SET size_options = NULL, price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (new_price, meal_name, category, restaurant))
-                await db.commit()
-                await query.edit_message_text(f"✅ تم حذف القياس {size_to_remove} بنجاح.\n⚡ الوجبة الآن أصبحت بدون قياسات.")
-            else:
-                new_base_price = max(s["price"] for s in updated_sizes)
-                await db.execute("""
-                    UPDATE meals SET size_options = ?, price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (
-                    json.dumps(updated_sizes, ensure_ascii=False),
-                    new_base_price,
-                    meal_name, category, restaurant
-                ))
-                await db.commit()
-                await query.edit_message_text(f"✅ تم حذف القياس {size_to_remove} بنجاح.")
+                if len(updated_sizes) == 1:
+                    new_price = updated_sizes[0]["price"]
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = NULL, price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (new_price, meal_name, category, restaurant))
+                    await conn.commit()
+                    await query.edit_message_text(f"✅ تم حذف القياس {size_to_remove} بنجاح.\n⚡ الوجبة الآن أصبحت بدون قياسات.")
+                else:
+                    new_base_price = max(s["price"] for s in updated_sizes)
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = %s, price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (
+                        json.dumps(updated_sizes, ensure_ascii=False),
+                        new_base_price,
+                        meal_name, category, restaurant
+                    ))
+                    await conn.commit()
+                    await query.edit_message_text(f"✅ تم حذف القياس {size_to_remove} بنجاح.")
 
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء حذف القياس: {e}")
@@ -3922,6 +4057,7 @@ async def handle_remove_size(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop(key, None)
 
     await show_meal_management_menu(update, context)
+
 
 async def handle_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("edit_step") != "add_sizes_to_empty":
@@ -3954,20 +4090,21 @@ async def handle_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TY
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            await db.execute("""
-                UPDATE meals SET size_options = ?, price = ?
-                WHERE name = ? AND category_id = (
-                    SELECT c.id FROM categories c
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = ? AND r.name = ?
-                )
-            """, (
-                json.dumps(formatted_sizes, ensure_ascii=False),
-                max(s["price"] for s in formatted_sizes),
-                meal_name, category, restaurant
-            ))
-            await db.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE meals SET size_options = %s, price = %s
+                    WHERE name = %s AND category_id = (
+                        SELECT c.id FROM categories c
+                        JOIN restaurants r ON c.restaurant_id = r.id
+                        WHERE c.name = %s AND r.name = %s
+                    )
+                """, (
+                    json.dumps(formatted_sizes, ensure_ascii=False),
+                    max(s["price"] for s in formatted_sizes),
+                    meal_name, category, restaurant
+                ))
+                await conn.commit()
 
         await update.message.reply_text("✅ تم حفظ القياسات بنجاح.")
         context.user_data.pop("edit_step", None)
@@ -3976,7 +4113,6 @@ async def handle_new_meal_sizes(update: Update, context: ContextTypes.DEFAULT_TY
 
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء حفظ القياسات: {e}")
-
 
 
 async def show_meal_management_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4004,14 +4140,16 @@ async def _choose_meal_for_edit(update, context, action_key, message):
     restaurant = context.user_data.get("selected_restaurant_meal")
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT m.name FROM meals m
-                JOIN categories c ON m.category_id = c.id
-                JOIN restaurants r ON c.restaurant_id = r.id
-                WHERE c.name = ? AND r.name = ?
-            """, (category, restaurant)) as cursor:
-                meals = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT m.name FROM meals m
+                    JOIN categories c ON m.category_id = c.id
+                    JOIN restaurants r ON c.restaurant_id = r.id
+                    WHERE c.name = %s AND r.name = %s
+                """, (category, restaurant))
+                rows = await cursor.fetchall()
+                meals = [row[0] for row in rows]
 
         if not meals:
             await query.edit_message_text("❌ لا توجد وجبات في هذه الفئة.")
@@ -4027,6 +4165,8 @@ async def _choose_meal_for_edit(update, context, action_key, message):
 
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء جلب الوجبات: {e}")
+
+
 
 
 async def handle_blacklist_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4057,7 +4197,6 @@ async def handle_add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["blacklist_action"] = "remove"
     await update.message.reply_text("📱 أرسل الرقم الذي تريد فك الحظر عنه:")
-
 async def handle_blacklist_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.user_data.get("blacklist_action")
     phone = update.message.text.strip()
@@ -4067,18 +4206,24 @@ async def handle_blacklist_phone_input(update: Update, context: ContextTypes.DEF
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            if action == "add":
-                await db.execute("INSERT OR IGNORE INTO blacklisted_numbers (phone) VALUES (?)", (phone,))
-                await db.commit()
-                await update.message.reply_text(f"✅ تم حظر الرقم {phone} بنجاح.")
-            elif action == "remove":
-                await db.execute("DELETE FROM blacklisted_numbers WHERE phone = ?", (phone,))
-                await db.commit()
-                await update.message.reply_text(f"✅ تم فك الحظر عن الرقم {phone} بنجاح.")
-            else:
-                await update.message.reply_text("⚠️ لم يتم تحديد العملية بشكل صحيح.")
-                return
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                if action == "add":
+                    await cursor.execute(
+                        "INSERT IGNORE INTO blacklisted_numbers (phone) VALUES (%s)", (phone,)
+                    )
+                    await conn.commit()
+                    await update.message.reply_text(f"✅ تم حظر الرقم {phone} بنجاح.")
+                elif action == "remove":
+                    await cursor.execute(
+                        "DELETE FROM blacklisted_numbers WHERE phone = %s", (phone,)
+                    )
+                    await conn.commit()
+                    await update.message.reply_text(f"✅ تم فك الحظر عن الرقم {phone} بنجاح.")
+                else:
+                    await update.message.reply_text("⚠️ لم يتم تحديد العملية بشكل صحيح.")
+                    return
+
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء تنفيذ العملية: {e}")
         return
@@ -4086,17 +4231,59 @@ async def handle_blacklist_phone_input(update: Update, context: ContextTypes.DEF
     context.user_data.pop("blacklist_action", None)
     await handle_blacklist_menu(update, context)
 
-async def handle_blacklist_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+async def handle_blacklist_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     action = query.data
-    if action == "add_blacklisted_number":
+
+    if action == "add_blacklist":
+        await query.edit_message_text("📱 أرسل رقم الهاتف الذي تريد حظره (يجب أن يبدأ بـ 09):")
         context.user_data["blacklist_action"] = "add"
-        await query.message.reply_text("📞 أرسل الرقم الذي تريد حظره:")
-    elif action == "remove_blacklisted_number":
-        context.user_data["blacklist_action"] = "remove"
-        await query.message.reply_text("📞 أرسل الرقم الذي تريد فك الحظر عنه:")
+    elif action == "remove_blacklist":
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT phone FROM blacklisted_numbers")
+                    numbers = await cursor.fetchall()
+
+            if not numbers:
+                await query.edit_message_text("✅ لا توجد أرقام محظورة حاليًا.")
+                return
+
+            keyboard = [
+                [InlineKeyboardButton(f"📱 {number[0]}", callback_data=f"unblock_{number[0]}")]
+                for number in numbers
+            ]
+            keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="go_blacklist_menu")])
+
+            await query.edit_message_text(
+                "📋 اختر الرقم الذي تريد إلغاء حظره:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            logging.error(f"❌ خطأ في handle_blacklist_action: {e}")
+            await query.edit_message_text("❌ حدث خطأ أثناء جلب الأرقام المحظورة.")
+    elif action == "view_blacklist":
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT phone FROM blacklisted_numbers")
+                    numbers = await cursor.fetchall()
+
+            if not numbers:
+                message = "✅ لا توجد أرقام محظورة حاليًا."
+            else:
+                message = "📋 قائمة الأرقام المحظورة:\n\n"
+                for i, number in enumerate(numbers, 1):
+                    message += f"{i}. 📱 {number[0]}\n"
+
+            keyboard = [[InlineKeyboardButton("↩️ العودة", callback_data="go_blacklist_menu")]]
+            await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            logging.error(f"❌ خطأ في handle_blacklist_action: {e}")
+            await query.edit_message_text("❌ حدث خطأ أثناء جلب الأرقام المحظورة.")
 
 async def handle_freeze_unfreeze_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4111,13 +4298,20 @@ async def handle_freeze_unfreeze_selection(update: Update, context: ContextTypes
         return
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            if action == "freeze_restaurant":
-                async with db.execute("SELECT name FROM restaurants WHERE city = ? AND is_frozen = 0", (selected_city,)) as cursor:
-                    restaurants = [row[0] async for row in cursor]
-            else:
-                async with db.execute("SELECT name FROM restaurants WHERE city = ? AND is_frozen = 1", (selected_city,)) as cursor:
-                    restaurants = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                if action == "freeze_restaurant":
+                    await cursor.execute(
+                        "SELECT name FROM restaurants WHERE city = %s AND is_frozen = 0",
+                        (selected_city,)
+                    )
+                else:
+                    await cursor.execute(
+                        "SELECT name FROM restaurants WHERE city = %s AND is_frozen = 1",
+                        (selected_city,)
+                    )
+                restaurants = [row[0] for row in await cursor.fetchall()]
+
     except Exception as e:
         await query.message.reply_text(f"❌ حدث خطأ أثناء جلب المطاعم: {e}")
         return
@@ -4129,6 +4323,7 @@ async def handle_freeze_unfreeze_selection(update: Update, context: ContextTypes
     keyboard = [[InlineKeyboardButton(r, callback_data=f"select_freeze_restaurant_{r}")] for r in restaurants]
     await query.message.reply_text("اختر المطعم:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+
 async def handle_freeze_restaurant_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -4138,9 +4333,13 @@ async def handle_freeze_restaurant_choice(update: Update, context: ContextTypes.
     is_frozen = 1 if action == "freeze_restaurant" else 0
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            await db.execute("UPDATE restaurants SET is_frozen = ? WHERE name = ?", (is_frozen, restaurant_name))
-            await db.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE restaurants SET is_frozen = %s WHERE name = %s",
+                    (is_frozen, restaurant_name)
+                )
+                await conn.commit()
     except Exception as e:
         await query.message.reply_text(f"❌ حدث خطأ أثناء التعديل: {e}")
         return
@@ -4150,7 +4349,6 @@ async def handle_freeze_restaurant_choice(update: Update, context: ContextTypes.
 
     context.user_data.pop("freeze_action", None)
 
-    # ✅ العودة إلى القائمة الرئيسية بعد العملية
     keyboard = [
         [InlineKeyboardButton("🏙️ إدارة المحافظات", callback_data="go_manage_provinces")],
         [InlineKeyboardButton("🌆 إدارة المدن", callback_data="go_manage_cities")],
@@ -4162,15 +4360,15 @@ async def handle_freeze_restaurant_choice(update: Update, context: ContextTypes.
 
     await query.message.reply_text("⬅️ عدت إلى القائمة الرئيسية.", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
 async def start_city_ad_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT name FROM provinces ORDER BY name") as cursor:
-                provinces = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM provinces ORDER BY name")
+                provinces = [row[0] for row in await cursor.fetchall()]
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ في جلب المحافظات: {e}")
         return
@@ -4181,32 +4379,34 @@ async def start_city_ad_broadcast(update: Update, context: ContextTypes.DEFAULT_
 
     keyboard = [[InlineKeyboardButton(p, callback_data=f"select_ad_province_{p}")] for p in provinces]
     await query.edit_message_text("🌍 اختر المحافظة للإعلان:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-async def handle_ad_province_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_ad_province(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    province = query.data.replace("select_ad_province_", "")
+    province = query.data.replace("ad_select_province_", "")
     context.user_data["ad_province"] = province
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT c.name FROM cities c
-                JOIN provinces p ON c.province_id = p.id
-                WHERE p.name = ?
-            """, (province,)) as cursor:
-                cities = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT c.name FROM cities c
+                    JOIN provinces p ON c.province_id = p.id
+                    WHERE p.name = %s
+                """, (province,))
+                cities = [row[0] for row in await cursor.fetchall()]
     except Exception as e:
-        await query.edit_message_text(f"❌ خطأ في جلب المدن: {e}")
+        await query.edit_message_text(f"❌ حدث خطأ أثناء جلب المدن: {e}")
         return
 
     if not cities:
         await query.edit_message_text("❌ لا توجد مدن في هذه المحافظة.")
         return
 
-    keyboard = [[InlineKeyboardButton(c, callback_data=f"select_ad_city_{c}")] for c in cities]
-    await query.edit_message_text("🏙️ اختر المدينة:", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[InlineKeyboardButton(city, callback_data=f"ad_select_city_{city}")] for city in cities]
+    await query.edit_message_text("🏙️ اختر المدينة التي تريد النشر فيها:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+
 
 async def handle_ad_city_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4215,13 +4415,14 @@ async def handle_ad_city_selection(update: Update, context: ContextTypes.DEFAULT
     context.user_data["ad_city"] = city
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT r.name FROM restaurants r
-                JOIN cities c ON r.city_id = c.id
-                WHERE c.name = ?
-            """, (city,)) as cursor:
-                restaurants = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT r.name FROM restaurants r
+                    JOIN cities c ON r.city_id = c.id
+                    WHERE c.name = %s
+                """, (city,))
+                restaurants = [row[0] for row in await cursor.fetchall()]
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ في جلب المطاعم: {e}")
         return
@@ -4234,6 +4435,8 @@ async def handle_ad_city_selection(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text("🍽️ اختر المطعم المرسل للإعلان:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+
+
 async def handle_ad_restaurant_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -4242,17 +4445,17 @@ async def handle_ad_restaurant_selection(update: Update, context: ContextTypes.D
     context.user_data["ad_step"] = "awaiting_ad_text"
 
     await query.edit_message_text("📝 أرسل الآن نص الإعلان:")
-
 async def start_send_ad_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT DISTINCT p.name FROM provinces p
-                JOIN cities c ON p.id = c.province_id
-            """) as cursor:
-                provinces = [row[0] async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT DISTINCT p.name FROM provinces p
+                    JOIN cities c ON p.id = c.province_id
+                """)
+                provinces = [row[0] for row in await cursor.fetchall()]
     except Exception as e:
         await update.message.reply_text(f"❌ خطأ في جلب المحافظات: {e}")
         return
@@ -4267,41 +4470,16 @@ async def start_send_ad_flow(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def handle_ad_province(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    province = query.data.replace("ad_select_province_", "")
-    context.user_data["ad_province"] = province
-
-    try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT c.name FROM cities c
-                JOIN provinces p ON c.province_id = p.id
-                WHERE p.name = ?
-            """, (province,)) as cursor:
-                cities = [row[0] async for row in cursor]
-    except Exception as e:
-        await query.edit_message_text(f"❌ حدث خطأ أثناء جلب المدن: {e}")
-        return
-
-    if not cities:
-        await query.edit_message_text("❌ لا توجد مدن في هذه المحافظة.")
-        return
-
-    keyboard = [[InlineKeyboardButton(city, callback_data=f"ad_select_city_{city}")] for city in cities]
-    await query.edit_message_text("🏙️ اختر المدينة التي تريد النشر فيها:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
 async def start_send_vip_ad_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["vip_ad"] = True
     context.user_data["ad_step"] = "awaiting_ad_province"
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT id, name FROM provinces") as cursor:
-                provinces = [row async for row in cursor]
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id, name FROM provinces")
+                provinces = [row for row in await cursor.fetchall()]
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ أثناء جلب المحافظات: {e}")
         return
@@ -4311,8 +4489,10 @@ async def start_send_vip_ad_flow(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     keyboard = [[InlineKeyboardButton(name, callback_data=f"vip_ad_select_province_{id_}")] for id_, name in provinces]
-    await update.message.reply_text("🌍 اختر المحافظة التي تريد توجيه الإعلان الذهبي إليها:", reply_markup=InlineKeyboardMarkup(keyboard))
-
+    await update.message.reply_text(
+        "🌍 اختر المحافظة التي تريد توجيه الإعلان الذهبي إليها:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def handle_vip_ad_restaurant_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4322,8 +4502,9 @@ async def handle_vip_ad_restaurant_selected(update: Update, context: ContextType
     context.user_data["ad_restaurant_id"] = restaurant_id
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM restaurants WHERE id = %s", (restaurant_id,))
                 row = await cursor.fetchone()
     except Exception as e:
         await query.edit_message_text(f"❌ خطأ أثناء جلب اسم المطعم: {e}")
@@ -4341,6 +4522,7 @@ async def handle_vip_ad_restaurant_selected(update: Update, context: ContextType
         "أو اضغط 'تخطي ⏭️' إذا لم يكن هناك زر توجيه.",
         reply_markup=ReplyKeyboardMarkup([["تخطي ⏭️"]], resize_keyboard=True)
     )
+
 
 
 async def handle_skip_vip_ad_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4390,55 +4572,55 @@ async def send_vip_ad_to_channel(context: ContextTypes.DEFAULT_TYPE, ad_text: st
             reply_markup=button
         )
 
-
 async def handle_statistics(update, context):
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM users")
                 total_users = (await cursor.fetchone())[0]
 
-            async with db.execute("""
-                SELECT c.name, COUNT(*) FROM users u
-                JOIN cities c ON u.city_id = c.id
-                GROUP BY c.name
-            """) as cursor:
+                await cursor.execute("""
+                    SELECT c.name, COUNT(*) FROM users u
+                    JOIN cities c ON u.city_id = c.id
+                    GROUP BY c.name
+                """)
                 city_user_counts = await cursor.fetchall()
-            city_user_lines = "\n".join([f"- {name}: {count}" for name, count in city_user_counts]) or "لا يوجد"
+                city_user_lines = "\n".join([f"- {name}: {count}" for name, count in city_user_counts]) or "لا يوجد"
 
-            async with db.execute("""
-                SELECT p.name, 
-                       SUM(CASE WHEN o.status = 'مؤكد' THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN o.status = 'ملغى' THEN 1 ELSE 0 END),
-                       COUNT(*)
-                FROM orders o
-                JOIN restaurants r ON o.restaurant_id = r.id
-                JOIN cities c ON r.city_id = c.id
-                JOIN provinces p ON c.province_id = p.id
-                GROUP BY p.name
-            """) as cursor:
+                await cursor.execute("""
+                    SELECT p.name, 
+                           SUM(CASE WHEN o.status = 'مؤكد' THEN 1 ELSE 0 END),
+                           SUM(CASE WHEN o.status = 'ملغى' THEN 1 ELSE 0 END),
+                           COUNT(*)
+                    FROM orders o
+                    JOIN restaurants r ON o.restaurant_id = r.id
+                    JOIN cities c ON r.city_id = c.id
+                    JOIN provinces p ON c.province_id = p.id
+                    GROUP BY p.name
+                """)
                 province_stats = await cursor.fetchall()
-            province_lines = "\n".join([
-                f"- {p}: ✅ {conf} | ❌ {canc} | 📦 {total}"
-                for p, conf, canc, total in province_stats
-            ]) or "لا يوجد"
+                province_lines = "\n".join([
+                    f"- {p}: ✅ {conf} | ❌ {canc} | 📦 {total}"
+                    for p, conf, canc, total in province_stats
+                ]) or "لا يوجد"
 
-            async with db.execute("""
-                SELECT c.name, 
-                       SUM(CASE WHEN o.status = 'مؤكد' THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN o.status = 'ملغى' THEN 1 ELSE 0 END),
-                       COUNT(*)
-                FROM orders o
-                JOIN restaurants r ON o.restaurant_id = r.id
-                JOIN cities c ON r.city_id = c.id
-                GROUP BY c.name
-            """) as cursor:
+                await cursor.execute("""
+                    SELECT c.name, 
+                           SUM(CASE WHEN o.status = 'مؤكد' THEN 1 ELSE 0 END),
+                           SUM(CASE WHEN o.status = 'ملغى' THEN 1 ELSE 0 END),
+                           COUNT(*)
+                    FROM orders o
+                    JOIN restaurants r ON o.restaurant_id = r.id
+                    JOIN cities c ON r.city_id = c.id
+                    GROUP BY c.name
+                """)
                 city_stats = await cursor.fetchall()
-            city_order_lines = "\n".join([
-                f"- {c}: ✅ {conf} | ❌ {canc} | 📦 {total}"
-                for c, conf, canc, total in city_stats
-            ]) or "لا يوجد"
+                city_order_lines = "\n".join([
+                    f"- {c}: ✅ {conf} | ❌ {canc} | 📦 {total}"
+                    for c, conf, canc, total in city_stats
+                ]) or "لا يوجد"
 
-            async with db.execute("SELECT COUNT(*) FROM ads") as cursor:
+                await cursor.execute("SELECT COUNT(*) FROM ads")
                 total_ads = (await cursor.fetchone())[0]
 
     except Exception as e:
@@ -4456,6 +4638,8 @@ async def handle_statistics(update, context):
 
     await update.message.reply_text(text)
 
+
+
 async def ask_user_query(update, context):
     await update.message.reply_text("🔍 أرسل رقم المستخدم (يبدأ بـ 09) أو معرفه (يبدأ بـ @):")
     context.user_data["awaiting_user_search"] = True
@@ -4469,18 +4653,17 @@ async def handle_user_search(update, context):
 
     info = get_user_full_info(query)  # تأكد من أن هذه الدالة موجودة لديك
     await update.message.reply_text(info, parse_mode=ParseMode.MARKDOWN)
-
-
 async def handle_export_users(update, context):
     query = update.callback_query
     await query.answer()
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT name, phone, province, city, location_text, latitude, longitude, is_blocked
-                FROM users
-            """) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT name, phone, province, city, location_text, latitude, longitude, is_blocked
+                    FROM users
+                """)
                 rows = await cursor.fetchall()
 
         if not rows:
@@ -4500,19 +4683,19 @@ async def handle_export_users(update, context):
 
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء التصدير: {e}")
-
 async def handle_export_orders(update, context):
     query = update.callback_query
     await query.answer()
 
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("""
-                SELECT o.id, u.name, u.phone, u.city, o.restaurant_name, o.status, o.timestamp
-                FROM orders o
-                JOIN users u ON o.user_id = u.user_id
-                ORDER BY o.timestamp DESC
-            """) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT o.id, u.name, u.phone, u.city, o.restaurant_name, o.status, o.timestamp
+                    FROM orders o
+                    JOIN users u ON o.user_id = u.user_id
+                    ORDER BY o.timestamp DESC
+                """)
                 rows = await cursor.fetchall()
 
         if not rows:
@@ -4533,24 +4716,6 @@ async def handle_export_orders(update, context):
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء التصدير: {e}")
 
-async def handle_export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    try:
-        await query.answer()
-
-        keyboard = [
-            [InlineKeyboardButton("👤 تصدير بيانات المستخدمين", callback_data="export_users")],
-            [InlineKeyboardButton("📦 تصدير بيانات الطلبات", callback_data="export_orders")],
-            [InlineKeyboardButton("🔙 العودة", callback_data="go_main_menu")]
-        ]
-
-        await query.edit_message_text(
-            "📤 اختر نوع البيانات التي تريد تصديرها:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    except Exception as e:
-        await query.message.reply_text(f"❌ حدث خطأ أثناء عرض خيارات التصدير: {e}")
 
 
 async def run_admin_bot():
@@ -4559,19 +4724,14 @@ async def run_admin_bot():
     # إعداد قاعدة البيانات والجداول
     await setup_location_tables()
     await setup_menu_tables()
-    await drop_old_city_column()
     await ensure_is_frozen_column()
-    await add_city_id_to_restaurants()
-    await sync_city_ids_in_restaurants()
     await create_ads_table()
     await add_unique_id_column()
     await add_ads_channel_column_to_cities()
     await normalize_size_options()
     await update_restaurants_city_id()
 
-    # ✅ التحقق فقط
-    await debug_check_meals_table_structure()
-    await debug_check_categories_and_restaurants()
+    
 
     # إنشاء التطبيق
     app = Application.builder().token("8035243318:AAGiaP7K8ErWJar1xuxrnqPA8KD9QQwKT0c").build()
