@@ -1,4 +1,3 @@
 python-telegram-bot==20
 apscheduler
-aiosqlite
-nest_asyncio
+aiomysql>=0.1.1
