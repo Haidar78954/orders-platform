@@ -1586,14 +1586,15 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ):
         return await handle_close_hour(update, context)
 
-    # ✅ إضافة اسم وجبة جديدة
-    elif context.user_data.get("meal_action") == "add" and "new_meal_name" not in context.user_data:
+   # ✅ إضافة اسم وجبة جديدة
+    elif context.user_data.get("meal_action") == "add" and context.user_data.get("add_meal_step") == "awaiting_meal_name":
         context.user_data["new_meal_name"] = text
         if "selected_category" not in context.user_data:
             for key in ["selected_category_meal", "selected_category_category", "selected_category_restaurant"]:
                 if key in context.user_data:
                     context.user_data["selected_category"] = context.user_data[key]
                     break
+        context.user_data["add_meal_step"] = "awaiting_has_sizes"
         await update.message.reply_text(
             "📏 هل لهذه الوجبة قياسات؟",
             reply_markup=ReplyKeyboardMarkup(
@@ -1603,6 +1604,7 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         )
         return
+
 
     # ✅ تحديد وجود قياسات
     elif context.user_data.get("meal_action") == "add" and text in ["نعم، لها قياسات", "لا، لا يوجد قياسات"]:
