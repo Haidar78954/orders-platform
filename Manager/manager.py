@@ -833,6 +833,40 @@ async def handle_edit_ads_channel_input(update: Update, context: ContextTypes.DE
         await update.message.reply_text("❌ حدث خطأ أثناء تعديل القناة.")
 
 
+
+async def handle_send_city_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id, name FROM cities ORDER BY name")
+                cities = await cursor.fetchall()
+
+        if not cities:
+            await query.edit_message_text("❌ لا توجد مدن مسجلة.")
+            return
+
+        keyboard = [[InlineKeyboardButton("📢 إلى كل المدن", callback_data="ad_city_all")]]
+        keyboard += [
+            [InlineKeyboardButton(city_name, callback_data=f"ad_city_{city_id}")]
+            for city_id, city_name in cities
+        ]
+        keyboard.append([InlineKeyboardButton("↩️ العودة", callback_data="go_main_menu")])
+
+        await query.edit_message_text(
+            "🌆 اختر المدينة التي تريد إرسال الإعلان إليها:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    except Exception as e:
+        logging.error(f"خطأ في handle_send_city_ad: {e}")
+        await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المدن.")
+
+
+
+
 async def handle_ad_all_cities_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
