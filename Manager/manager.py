@@ -289,21 +289,7 @@ async def add_ads_channel_column_to_cities():
         await conn.commit()
 
 
-async def update_restaurants_city_id():
-    async with get_db_connection() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute("SELECT id, name FROM cities")
-            cities_data = await cursor.fetchall()
-            city_map = {name: cid for cid, name in cities_data}
 
-        updated = 0
-        for city_name, city_id_val in city_map.items():
-            async with conn.cursor() as cursor:
-                await cursor.execute("UPDATE restaurants SET city_id = %s WHERE city = %s", (city_id_val, city_name))
-                updated += cursor.rowcount
-
-        await conn.commit()
-        print(f"✅ تم تحديث {updated} مطعمًا بـ city_id.")
 
 
 # 🔐 توكن بوت الإدارة (غيّره بتوكنك الفعلي)
@@ -4834,7 +4820,6 @@ async def run_admin_bot():
     await add_unique_id_column()
     await add_ads_channel_column_to_cities()
     await normalize_size_options()
-    await update_restaurants_city_id()
 
     
 
