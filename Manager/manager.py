@@ -23,6 +23,9 @@ from datetime import datetime
 from telegram import InputFile
 
 
+ # إنشاء التطبيق
+    app = Application.builder().token("8035243318:AAGiaP7K8ErWJar1xuxrnqPA8KD9QQwKT0c").build()
+
 ADMIN_MEDIA_CHANNEL = -1002659459294
 
 
