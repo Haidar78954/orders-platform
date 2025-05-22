@@ -1231,7 +1231,7 @@ async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
 
 
-@app.on_callback_query(filters.Regex("^delete_restaurant$"))
+
 async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -4934,6 +4934,7 @@ async def run_admin_bot():
     app.add_handler(CallbackQueryHandler(handle_export_users, pattern="^export_users$"))
     app.add_handler(CallbackQueryHandler(handle_export_orders, pattern="^export_orders$"))
 
+    app.add_handler(CallbackQueryHandler(handle_delete_restaurant, pattern="^delete_restaurant$"))
     app.add_handler(CallbackQueryHandler(handle_ad_province, pattern=r"^ad_select_province_"))
     app.add_handler(CallbackQueryHandler(handle_send_city_ad, pattern="^send_city_ad$"))
     app.add_handler(CallbackQueryHandler(handle_ad_city_selection, pattern=r"^ad_select_city_"))
