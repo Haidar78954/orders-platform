@@ -4716,6 +4716,24 @@ async def handle_export_orders(update, context):
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء التصدير: {e}")
 
+async def handle_export_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    try:
+        await query.answer()
+
+        keyboard = [
+            [InlineKeyboardButton("👤 تصدير بيانات المستخدمين", callback_data="export_users")],
+            [InlineKeyboardButton("📦 تصدير بيانات الطلبات", callback_data="export_orders")],
+            [InlineKeyboardButton("🔙 العودة", callback_data="go_main_menu")]
+        ]
+
+        await query.edit_message_text(
+            "📤 اختر نوع البيانات التي تريد تصديرها:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    except Exception as e:
+        await query.message.reply_text(f"❌ حدث خطأ أثناء عرض خيارات التصدير: {e}")
 
 
 async def run_admin_bot():
