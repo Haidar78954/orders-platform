@@ -1226,12 +1226,16 @@ async def start_rename_restaurant(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logging.error(f"خطأ في start_rename_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
+
+
+@app.on_callback_query(filters.Regex("^delete_restaurant$"))
 async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         await query.answer()
 
         city = context.user_data.get("selected_city_restaurant")
+        context.user_data["restaurant_action"] = "delete_restaurant"
         if not city:
             await query.edit_message_text("⚠️ لم يتم تحديد المدينة.")
             return
@@ -1264,6 +1268,7 @@ async def start_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_
         logging.error(f"خطأ في start_delete_restaurant: {e}")
         await update.effective_message.reply_text("❌ حدث خطأ أثناء تحميل المطاعم.")
 
+
 async def ask_new_restaurant_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
@@ -1286,37 +1291,40 @@ async def confirm_delete_restaurant(update: Update, context: ContextTypes.DEFAUL
         restaurant_name = query.data.split("confirm_delete_restaurant_")[1]
 
         async with get_db_connection() as conn:
-            # الحصول على معرف المطعم
-            async with conn.execute("SELECT id FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
+            async with conn.cursor() as cursor:
+                # الحصول على معرف المطعم
+                await cursor.execute("SELECT id FROM restaurants WHERE name = %s", (restaurant_name,))
                 result = await cursor.fetchone()
                 if not result:
                     await query.edit_message_text("❌ لم يتم العثور على المطعم.")
                     return
                 restaurant_id = result[0]
 
-            # حذف الوجبات المرتبطة بفئات المطعم
-            await conn.execute("""
-                DELETE FROM meals WHERE category_id IN (
-                    SELECT id FROM categories WHERE restaurant_id = ?
-                )
-            """, (restaurant_id,))
+                # حذف الوجبات المرتبطة بفئات المطعم
+                await cursor.execute("""
+                    DELETE FROM meals WHERE category_id IN (
+                        SELECT id FROM categories WHERE restaurant_id = %s
+                    )
+                """, (restaurant_id,))
 
-            # حذف فئات المطعم
-            await conn.execute("DELETE FROM categories WHERE restaurant_id = ?", (restaurant_id,))
+                # حذف الفئات
+                await cursor.execute("DELETE FROM categories WHERE restaurant_id = %s", (restaurant_id,))
 
-            # حذف تقييمات المطعم
-            await conn.execute("DELETE FROM restaurant_ratings WHERE restaurant_id = ?", (restaurant_id,))
+                # حذف التقييمات
+                await cursor.execute("DELETE FROM restaurant_ratings WHERE restaurant_id = %s", (restaurant_id,))
 
-            # حذف المطعم نفسه
-            await conn.execute("DELETE FROM restaurants WHERE id = ?", (restaurant_id,))
+                # حذف المطعم
+                await cursor.execute("DELETE FROM restaurants WHERE id = %s", (restaurant_id,))
 
-            await conn.commit()
+                await conn.commit()
 
         await query.edit_message_text(f"🗑️ تم حذف المطعم '{restaurant_name}' وكل محتوياته.")
         await start(update, context)
+
     except Exception as e:
-        logging.error(f"خطأ في confirm_delete_restaurant: {e}")
+        logging.error(f"خطأ في confirm_delete_restaurant: {e}", exc_info=True)
         await update.effective_message.reply_text("❌ حدث خطأ أثناء حذف المطعم.")
+
 
 
 async def handle_add_delete_restaurant(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1333,7 +1341,6 @@ async def handle_add_delete_restaurant(update: Update, context: ContextTypes.DEF
         await update.effective_message.reply_text("❌ حدث خطأ أثناء اختيار العملية.")
 
 
-
 async def handle_restaurant_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1348,17 +1355,19 @@ async def handle_restaurant_edit_action(update: Update, context: ContextTypes.DE
 
     try:
         async with get_db_connection() as conn:
-            async with conn.execute("SELECT id FROM cities WHERE name = ?", (city_name,)) as cursor:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM cities WHERE name = %s", (city_name,))
                 result = await cursor.fetchone()
 
-            if not result:
-                await query.edit_message_text("❌ لم يتم العثور على المدينة.")
-                return
+                if not result:
+                    await query.edit_message_text("❌ لم يتم العثور على المدينة.")
+                    return
 
-            city_id = result[0]
+                city_id = result[0]
 
-            async with conn.execute("SELECT name FROM restaurants WHERE city_id = ?", (city_id,)) as cursor:
-                restaurants = [row[0] async for row in cursor]
+                await cursor.execute("SELECT name FROM restaurants WHERE city_id = %s", (city_id,))
+                restaurants_data = await cursor.fetchall()
+                restaurants = [row[0] for row in restaurants_data]
 
         if not restaurants:
             await query.edit_message_text("❌ لا توجد مطاعم مسجلة في هذه المدينة.")
@@ -1374,7 +1383,7 @@ async def handle_restaurant_edit_action(update: Update, context: ContextTypes.DE
         )
 
     except Exception as e:
-        logging.error(f"❌ خطأ في handle_restaurant_edit_action: {e}")
+        logging.error(f"❌ خطأ في handle_restaurant_edit_action: {e}", exc_info=True)
         await query.edit_message_text("❌ حدث خطأ أثناء تحميل بيانات المطاعم.")
 
 
@@ -1472,6 +1481,7 @@ async def handle_open_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["open_hour"] = open_hour
     await update.message.reply_text("⏰ أرسل وقت *الإغلاق* (مثال: 23 أو 22.5):", parse_mode="Markdown")
     return "ASK_CLOSE_HOUR"
+
 async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         close_hour = float(update.message.text.strip())
@@ -1479,7 +1489,7 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise ValueError
     except ValueError:
         await update.message.reply_text("⚠️ يرجى إرسال رقم بين 0 و 24.")
-        return "ASK_CLOSE_HOUR"
+        return
 
     context.user_data["close_hour"] = close_hour
 
@@ -1490,7 +1500,7 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if name is None or channel is None or open_hour is None or city_name is None:
         await update.message.reply_text("❌ حدث خطأ. بعض البيانات مفقودة.")
-        return ConversationHandler.END
+        return
 
     try:
         async with get_db_connection() as conn:
@@ -1500,7 +1510,7 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 if not result:
                     await update.message.reply_text("❌ لم يتم العثور على المدينة.")
-                    return ConversationHandler.END
+                    return
 
                 city_id = result[0]
                 await cursor.execute("""
@@ -1511,13 +1521,16 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(f"✅ تم إضافة المطعم '{name}' بنجاح.")
         context.user_data.clear()
-        await start(update, context)
-        return ConversationHandler.END
+
+        # ✅ استبدال start برسالة آمنة
+        await update.message.reply_text("⬅️ عدت للقائمة الرئيسية. أرسل /start أو اختر من القائمة.")
+        return
 
     except Exception as e:
-        logging.error(f"خطأ في handle_close_hour: {e}")
+        logging.error(f"خطأ في handle_close_hour: {e}", exc_info=True)
         await update.message.reply_text("❌ حدث خطأ أثناء حفظ بيانات المطعم.")
-        return ConversationHandler.END
+        return
+
 
 async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -1539,11 +1552,11 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("UPDATE cities SET ads_channel = ? WHERE name = ?", (new_channel, city))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("UPDATE cities SET ads_channel = %s WHERE name = %s", (new_channel, city))
+                    await conn.commit()
         except Exception as e:
-            logging.error(f"خطأ في تعديل ads_channel: {e}")
+            logging.error(f"خطأ في تعديل ads_channel: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل قناة الإعلانات.")
             return
 
@@ -1640,172 +1653,172 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    UPDATE meals SET name = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (new_name, old_name, category_name, restaurant_name))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE meals SET name = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (new_name, old_name, category_name, restaurant_name))
+                    await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم الوجبة إلى: {new_name}")
         except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ هناك وجبة بهذا الاسم موجودة مسبقًا.")
         except Exception as e:
-            logging.error(f"خطأ في تعديل اسم الوجبة: {e}")
+            logging.error(f"خطأ في تعديل اسم الوجبة: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل اسم الوجبة.")
 
         context.user_data.pop("meal_action", None)
         context.user_data.pop("old_meal_name", None)
         return await show_meal_options(update, context)
 
-# ✅ تعديل سعر وجبة (بقياسات أو بدون)
+    # ✅ تعديل سعر وجبة (بقياسات أو بدون)
     elif context.user_data.get("meal_action") == "edit_price":
         step = context.user_data.get("edit_price_step")
         meal_name = context.user_data.get("meal_to_edit_price")
         category = context.user_data.get("selected_category_meal")
         restaurant = context.user_data.get("selected_restaurant_meal")
-
+    
         if not meal_name or not category or not restaurant:
             await update.message.reply_text("❌ لا يمكن تحديد نوع التعديل. يرجى البدء من جديد.")
             context.user_data.clear()
             return await start(update, context)
-
+    
         if not text.isdigit():
             await update.message.reply_text("❌ السعر يجب أن يكون رقمًا.")
             return
-
+    
         try:
             async with get_db_connection() as conn:
-
-                if not step or step == "single_price":
-                    new_price = int(text)
-                    await conn.execute("""
-                        UPDATE meals SET price = ?, size_options = NULL
-                        WHERE name = ? AND category_id = (
-                            SELECT c.id FROM categories c
-                            JOIN restaurants r ON c.restaurant_id = r.id
-                            WHERE c.name = ? AND r.name = ?
-                        )
-                    """, (new_price, meal_name, category, restaurant))
-                    await conn.commit()
-                    await update.message.reply_text(f"✅ تم تعديل سعر '{meal_name}' إلى {new_price} ل.س.")
-
-                    for key in ["meal_action", "meal_to_edit_price", "edit_price_step"]:
-                        context.user_data.pop(key, None)
-                    return await show_meal_options(update, context)
-
-                elif step == "multi_price":
-                    current_index = context.user_data.get("current_size_index", 0)
-                    sizes = context.user_data.get("edit_price_sizes", [])
-                    if current_index >= len(sizes):
-                        await update.message.reply_text("❌ حدث خطأ في عدد القياسات. يرجى البدء من جديد.")
-                        context.user_data.clear()
-                        return await start(update, context)
-
-                    current_size_obj = sizes[current_index]
-                    size_name = current_size_obj["name"]
-
-                    if "edit_price_data" not in context.user_data:
-                        context.user_data["edit_price_data"] = {}
-
-                    context.user_data["edit_price_data"][size_name] = int(text)
-
-                    if current_index + 1 < len(sizes):
-                        context.user_data["current_size_index"] = current_index + 1
-                        next_size = sizes[current_index + 1]
-                        await update.message.reply_text(
-                        f"💬 أرسل السعر الجديد للقياس: {next_size['name']} (السعر الحالي: {next_size['price']} ل.س)"
-                    )
-                        return
-
-                # جميع الأسعار تم إدخالها
-                    price_dict = context.user_data["edit_price_data"]
-                    base_price = max(price_dict.values())
-
-                    await conn.execute("""
-                        UPDATE meals SET price = ?, size_options = ?
-                        WHERE name = ? AND category_id = (
-                            SELECT c.id FROM categories c
-                            JOIN restaurants r ON c.restaurant_id = r.id
-                            WHERE c.name = ? AND r.name = ?
-                        )
-                    """, (
-                        base_price,
-                        json.dumps([
-                            {"name": name, "price": price}
-                            for name, price in price_dict.items()
-                        ], ensure_ascii=False),
-                        meal_name,
-                        category,
-                        restaurant
-                    ))
-                    await conn.commit()
-
-                    await update.message.reply_text(f"✅ تم تعديل سعر '{meal_name}' بنجاح.")
-                    for key in ["meal_action", "edit_price_step", "meal_to_edit_price", "edit_price_data", "edit_price_sizes", "current_size_index"]:
-                        context.user_data.pop(key, None)
-                    return await show_meal_options(update, context)
-
+                async with conn.cursor() as cursor:
+    
+                    if not step or step == "single_price":
+                        new_price = int(text)
+                        await cursor.execute("""
+                            UPDATE meals SET price = %s, size_options = NULL
+                            WHERE name = %s AND category_id = (
+                                SELECT c.id FROM categories c
+                                JOIN restaurants r ON c.restaurant_id = r.id
+                                WHERE c.name = %s AND r.name = %s
+                            )
+                        """, (new_price, meal_name, category, restaurant))
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم تعديل سعر '{meal_name}' إلى {new_price} ل.س.")
+    
+                        for key in ["meal_action", "meal_to_edit_price", "edit_price_step"]:
+                            context.user_data.pop(key, None)
+                        return await show_meal_options(update, context)
+    
+                    elif step == "multi_price":
+                        current_index = context.user_data.get("current_size_index", 0)
+                        sizes = context.user_data.get("edit_price_sizes", [])
+                        if current_index >= len(sizes):
+                            await update.message.reply_text("❌ حدث خطأ في عدد القياسات. يرجى البدء من جديد.")
+                            context.user_data.clear()
+                            return await start(update, context)
+    
+                        current_size_obj = sizes[current_index]
+                        size_name = current_size_obj["name"]
+    
+                        if "edit_price_data" not in context.user_data:
+                            context.user_data["edit_price_data"] = {}
+    
+                        context.user_data["edit_price_data"][size_name] = int(text)
+    
+                        if current_index + 1 < len(sizes):
+                            context.user_data["current_size_index"] = current_index + 1
+                            next_size = sizes[current_index + 1]
+                            await update.message.reply_text(
+                                f"💬 أرسل السعر الجديد للقياس: {next_size['name']} (السعر الحالي: {next_size['price']} ل.س)"
+                            )
+                            return
+    
+                        price_dict = context.user_data["edit_price_data"]
+                        base_price = max(price_dict.values())
+    
+                        await cursor.execute("""
+                            UPDATE meals SET price = %s, size_options = %s
+                            WHERE name = %s AND category_id = (
+                                SELECT c.id FROM categories c
+                                JOIN restaurants r ON c.restaurant_id = r.id
+                                WHERE c.name = %s AND r.name = %s
+                            )
+                        """, (
+                            base_price,
+                            json.dumps([
+                                {"name": name, "price": price}
+                                for name, price in price_dict.items()
+                            ], ensure_ascii=False),
+                            meal_name,
+                            category,
+                            restaurant
+                        ))
+                        await conn.commit()
+    
+                        await update.message.reply_text(f"✅ تم تعديل سعر '{meal_name}' بنجاح.")
+                        for key in ["meal_action", "edit_price_step", "meal_to_edit_price", "edit_price_data", "edit_price_sizes", "current_size_index"]:
+                            context.user_data.pop(key, None)
+                        return await show_meal_options(update, context)
+    
         except Exception as e:
-            logging.error(f"خطأ أثناء تعديل السعر: {e}")
+            logging.error(f"خطأ أثناء تعديل السعر: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل السعر.")
             return await start(update, context)
-
-# ✅ تعديل وصف الوجبة (الكابشن)
+    
+    # ✅ تعديل وصف الوجبة (الكابشن)
     elif context.user_data.get("meal_action") == "edit_caption" and "meal_to_edit_caption_id" in context.user_data:
         new_caption = text
         meal_id = context.user_data["meal_to_edit_caption_id"]
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("UPDATE meals SET caption = ? WHERE id = ?", (new_caption, meal_id))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("UPDATE meals SET caption = %s WHERE id = %s", (new_caption, meal_id))
+                    await conn.commit()
             await update.message.reply_text("✅ تم تعديل وصف الوجبة بنجاح.")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل الكابشن: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل الكابشن: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل الكابشن.")
-
+    
         context.user_data.pop("meal_action", None)
         context.user_data.pop("meal_to_edit_caption_id", None)
         return await show_meal_management_menu(update, context)
-
-# ✅ تعديل القياسات - استقبال خيار الإضافة أو الحذف
+    
+    # ✅ تعديل القياسات - استقبال خيار الإضافة أو الحذف
     elif context.user_data.get("meal_action") == "edit_sizes_choice":
         if text == "➕ إضافة قياس":
             context.user_data["edit_step"] = "add_single_size"
             context.user_data["meal_action"] = "edit_sizes"
             await update.message.reply_text("✏️ أرسل القياس والسعر بصيغة مثل: وسط/6000")
-
+    
         elif text == "❌ حذف قياس":
             meal_name = context.user_data.get("meal_to_edit_sizes")
             category_name = context.user_data.get("selected_category_meal")
             restaurant_name = context.user_data.get("selected_restaurant_meal")
-
+    
             try:
                 async with get_db_connection() as conn:
-
-                    async with conn.execute("""
-                        SELECT size_options FROM meals
-                        WHERE name = ? AND category_id = (
-                            SELECT c.id FROM categories c
-                            JOIN restaurants r ON c.restaurant_id = r.id
-                            WHERE c.name = ? AND r.name = ?
-                        )
-                    """, (meal_name, category_name, restaurant_name)) as cursor:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("""
+                            SELECT size_options FROM meals
+                            WHERE name = %s AND category_id = (
+                                SELECT c.id FROM categories c
+                                JOIN restaurants r ON c.restaurant_id = r.id
+                                WHERE c.name = %s AND r.name = %s
+                            )
+                        """, (meal_name, category_name, restaurant_name))
                         result = await cursor.fetchone()
-
+    
                 if not result or not result[0]:
                     await update.message.reply_text("❌ لا توجد قياسات محفوظة لهذه الوجبة.")
                     context.user_data.clear()
                     return await show_meal_options(update, context)
-
+    
                 sizes_data = json.loads(result[0])
                 context.user_data["sizes_to_remove"] = sizes_data
-
+    
                 keyboard = [
                     [InlineKeyboardButton(s["name"], callback_data=f"remove_size_{s['name']}")]
                     for s in sizes_data
@@ -1815,310 +1828,305 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 context.user_data["meal_action"] = "remove_size"
-
+    
             except Exception as e:
-                logging.error(f"❌ خطأ أثناء تحميل القياسات للحذف: {e}")
+                logging.error(f"❌ خطأ أثناء تحميل القياسات للحذف: {e}", exc_info=True)
                 await update.message.reply_text("❌ حدث خطأ أثناء تحميل القياسات.")
                 context.user_data.clear()
                 return await start(update, context)
-
-  # حذف قياس معين
-  # ✅ حذف قياس معين
+    
+    # ✅ حذف قياس معين
     elif context.user_data.get("meal_action") == "remove_size":
         size_to_remove = text
         sizes = context.user_data.get("sizes_to_remove", [])
         updated_sizes = [s for s in sizes if s["name"] != size_to_remove]
-
+    
         if len(updated_sizes) == len(sizes):
             await update.message.reply_text("⚠️ القياس غير موجود.")
             return
-
+    
         meal_name = context.user_data.get("meal_to_edit_sizes")
         category_name = context.user_data.get("selected_category_meal")
         restaurant_name = context.user_data.get("selected_restaurant_meal")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    UPDATE meals SET size_options = ?, price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (
-                    json.dumps(updated_sizes, ensure_ascii=False),
-                    max([s["price"] for s in updated_sizes]) if updated_sizes else 0,
-                    meal_name, category_name, restaurant_name
-                ))
-                await conn.commit()
-
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = %s, price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (
+                        json.dumps(updated_sizes, ensure_ascii=False),
+                        max([s["price"] for s in updated_sizes]) if updated_sizes else 0,
+                        meal_name, category_name, restaurant_name
+                    ))
+                    await conn.commit()
+    
             await update.message.reply_text("✅ تم حذف القياس بنجاح.")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء حذف القياس: {e}")
+            logging.error(f"❌ خطأ أثناء حذف القياس: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء حذف القياس.")
-
+    
         for key in ["meal_action", "meal_to_edit_sizes", "edit_step", "sizes_to_remove"]:
             context.user_data.pop(key, None)
         return await show_meal_management_menu(update, context)
-
-  # ✅ استقبال قياس جديد أثناء تعديل القياسات
+    
+    # ✅ استقبال قياس جديد أثناء تعديل القياسات
     elif context.user_data.get("edit_step") == "add_single_size":
         if "/" not in text:
             await update.message.reply_text("⚠️ الصيغة غير صحيحة. أرسلها مثل: وسط/6000")
             return
-
+    
         size_name, price_str = text.split("/", 1)
         try:
             price = int(price_str)
         except ValueError:
             await update.message.reply_text("⚠️ السعر غير صالح. أرسل رقمًا فقط.")
             return
-
+    
         new_size = {"name": size_name.strip(), "price": price}
         meal_name = context.user_data.get("meal_to_edit_sizes")
         category_name = context.user_data.get("selected_category_meal")
         restaurant_name = context.user_data.get("selected_restaurant_meal")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                async with conn.execute("""
-                    SELECT size_options FROM meals
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (meal_name, category_name, restaurant_name)) as cursor:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT size_options FROM meals
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (meal_name, category_name, restaurant_name))
                     result = await cursor.fetchone()
-
-                sizes = json.loads(result[0]) if result and result[0] else []
-                sizes.append(new_size)
-
-                await conn.execute("""
-                    UPDATE meals SET size_options = ?, price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (
-                    json.dumps(sizes, ensure_ascii=False),
-                    max([s["price"] for s in sizes]),
-                    meal_name, category_name, restaurant_name
-                ))
-                await conn.commit()
-
+    
+                    sizes = json.loads(result[0]) if result and result[0] else []
+                    sizes.append(new_size)
+    
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = %s, price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (
+                        json.dumps(sizes, ensure_ascii=False),
+                        max([s["price"] for s in sizes]),
+                        meal_name, category_name, restaurant_name
+                    ))
+                    await conn.commit()
+    
             await update.message.reply_text("✅ تم إضافة القياس الجديد بنجاح.")
             context.user_data.clear()
             return await show_meal_management_menu(update, context)
-
+    
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء إضافة قياس جديد: {e}")
+            logging.error(f"❌ خطأ أثناء إضافة قياس جديد: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء إضافة القياس.")
             return await start(update, context)
 
-  # ✅ تعديل قياسات وجبة لا تحتوي على قياسات سابقًا
+
     elif context.user_data.get("meal_action") == "edit_sizes" and context.user_data.get("edit_step") == "add_sizes_to_empty":
         try:
             sizes = [s.strip() for s in text.split(",")]
             formatted_sizes = []
-
+    
             for s in sizes:
                 if "/" not in s:
                     raise ValueError("صيغة غير صحيحة.")
                 name, price = s.split("/")
                 formatted_sizes.append({"name": name.strip(), "price": int(price.strip())})
-
+    
             meal_name = context.user_data.get("meal_to_edit_sizes")
             category = context.user_data.get("selected_category_meal")
             restaurant = context.user_data.get("selected_restaurant_meal")
-
+    
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    UPDATE meals SET size_options = ?, price = ?
-                    WHERE name = ? AND category_id = (
-                        SELECT c.id FROM categories c
-                        JOIN restaurants r ON c.restaurant_id = r.id
-                        WHERE c.name = ? AND r.name = ?
-                    )
-                """, (
-                    json.dumps(formatted_sizes, ensure_ascii=False),
-                    max(s["price"] for s in formatted_sizes),
-                    meal_name, category, restaurant
-                ))
-                await conn.commit()
-
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE meals SET size_options = %s, price = %s
+                        WHERE name = %s AND category_id = (
+                            SELECT c.id FROM categories c
+                            JOIN restaurants r ON c.restaurant_id = r.id
+                            WHERE c.name = %s AND r.name = %s
+                        )
+                    """, (
+                        json.dumps(formatted_sizes, ensure_ascii=False),
+                        max(s["price"] for s in formatted_sizes),
+                        meal_name, category, restaurant
+                    ))
+                    await conn.commit()
+    
             await update.message.reply_text("✅ تم حفظ القياسات بنجاح.")
             for key in ["meal_action", "edit_step", "meal_to_edit_sizes"]:
                 context.user_data.pop(key, None)
             return await show_meal_management_menu(update, context)
-
+    
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء حفظ القياسات الجديدة: {e}")
+            logging.error(f"❌ خطأ أثناء حفظ القياسات الجديدة: {e}", exc_info=True)
             await update.message.reply_text("❌ تأكد من كتابة القياسات بشكل صحيح مثل: كبير/5000, صغير/3000")
             return
-
-  # ✅ إضافة فئة جديدة
+    
     elif context.user_data.get("category_action") == "add":
         category_name = text
         restaurant_name = context.user_data.get("selected_restaurant_category")
-
+    
         if not restaurant_name:
             await update.message.reply_text("⚠️ لم يتم تحديد المطعم. يرجى العودة واختياره من جديد.")
             return
-
+    
         try:
             async with get_db_connection() as conn:
-
-                async with conn.execute("SELECT id FROM restaurants WHERE name = ?", (restaurant_name,)) as cursor:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT id FROM restaurants WHERE name = %s", (restaurant_name,))
                     result = await cursor.fetchone()
-
-                if not result:
-                    await update.message.reply_text("❌ لم يتم العثور على المطعم في قاعدة البيانات.")
-                    return
-
-                restaurant_id = result[0]
-                try:
-                    await conn.execute(
-                        "INSERT INTO categories (name, restaurant_id) VALUES (?, ?)",
-                        (category_name, restaurant_id)
-                    )
-                    await conn.commit()
-                    await update.message.reply_text(f"✅ تم إضافة الفئة: {category_name}")
-                except pymysql.err.IntegrityError:
-                    await update.message.reply_text("⚠️ هذه الفئة موجودة بالفعل لهذا المطعم.")
-
+    
+                    if not result:
+                        await update.message.reply_text("❌ لم يتم العثور على المطعم في قاعدة البيانات.")
+                        return
+    
+                    restaurant_id = result[0]
+                    try:
+                        await cursor.execute(
+                            "INSERT INTO categories (name, restaurant_id) VALUES (%s, %s)",
+                            (category_name, restaurant_id)
+                        )
+                        await conn.commit()
+                        await update.message.reply_text(f"✅ تم إضافة الفئة: {category_name}")
+                    except pymysql.err.IntegrityError:
+                        await update.message.reply_text("⚠️ هذه الفئة موجودة بالفعل لهذا المطعم.")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء إضافة فئة: {e}")
+            logging.error(f"❌ خطأ أثناء إضافة فئة: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء إضافة الفئة.")
-
+    
         context.user_data.pop("category_action", None)
         return await show_category_options(update, context)
-
-    # حذف فئة
+    
     elif context.user_data.get("category_action") == "delete":
         category_name = text
         restaurant_name = context.user_data.get("selected_restaurant_category")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    DELETE FROM categories
-                    WHERE name = ? AND restaurant_id = (
-                        SELECT id FROM restaurants WHERE name = ?
-                    )
-                """, (category_name, restaurant_name))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        DELETE FROM categories
+                        WHERE name = %s AND restaurant_id = (
+                            SELECT id FROM restaurants WHERE name = %s
+                        )
+                    """, (category_name, restaurant_name))
+                    await conn.commit()
             await update.message.reply_text(f"🗑️ تم حذف الفئة: {category_name}")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء حذف الفئة: {e}")
+            logging.error(f"❌ خطأ أثناء حذف الفئة: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء حذف الفئة.")
-
+    
         context.user_data.pop("category_action", None)
         return await show_category_options(update, context)
-
-    # تعديل اسم فئة - استلام الاسم القديم
+    
     elif context.user_data.get("category_action") == "edit_old_name":
         context.user_data["old_category_name"] = text
         context.user_data["category_action"] = "edit_new_name"
         await update.message.reply_text("📝 أرسل الاسم الجديد للفئة:")
         return
-
-    # تعديل اسم فئة - استلام الاسم الجديد
+    
     elif context.user_data.get("category_action") == "edit_new_name":
         new_name = text
         old_name = context.user_data.get("old_category_name")
         restaurant_name = context.user_data.get("selected_restaurant_category")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    UPDATE categories SET name = ?
-                    WHERE name = ? AND restaurant_id = (
-                        SELECT id FROM restaurants WHERE name = ?
-                    )
-                """, (new_name, old_name, restaurant_name))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE categories SET name = %s
+                        WHERE name = %s AND restaurant_id = (
+                            SELECT id FROM restaurants WHERE name = %s
+                        )
+                    """, (new_name, old_name, restaurant_name))
+                    await conn.commit()
             await update.message.reply_text(f"✏️ تم تعديل اسم الفئة إلى: {new_name}")
         except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ توجد فئة بهذا الاسم مسبقًا.")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل اسم الفئة: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل اسم الفئة: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل اسم الفئة.")
-
+    
         context.user_data.pop("category_action", None)
         context.user_data.pop("old_category_name", None)
         return await show_category_options(update, context)
 
-    # تعديل اسم مطعم (من اختيار المطعم أولًا)
+
+    # ✅ تعديل اسم مطعم (من اختيار المطعم أولًا)
     elif context.user_data.get("restaurant_action") == "rename" and "old_restaurant_name" in context.user_data:
         new_name = text
         old_name = context.user_data["old_restaurant_name"]
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("UPDATE restaurants SET name = ? WHERE name = ?", (new_name, old_name))
-                await conn.execute("UPDATE restaurant_ratings SET restaurant = ? WHERE restaurant = ?", (new_name, old_name))
-                await conn.execute("UPDATE user_orders SET restaurant = ? WHERE restaurant = ?", (new_name, old_name))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("UPDATE restaurants SET name = %s WHERE name = %s", (new_name, old_name))
+                    await cursor.execute("UPDATE restaurant_ratings SET restaurant = %s WHERE restaurant = %s", (new_name, old_name))
+                    await cursor.execute("UPDATE user_orders SET restaurant = %s WHERE restaurant = %s", (new_name, old_name))
+                    await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم المطعم إلى: {new_name}")
         except pymysql.err.IntegrityError:
             await update.message.reply_text("⚠️ يوجد مطعم بهذا الاسم مسبقًا.")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل اسم المطعم: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل اسم المطعم: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل اسم المطعم.")
-
+    
         context.user_data.pop("restaurant_action", None)
         context.user_data.pop("old_restaurant_name", None)
         return await start(update, context)
-
-    # تعديل اسم مطعم (عبر خطوة edit)
+    
+    # ✅ تعديل اسم مطعم (عبر خطوة edit)
     elif context.user_data.get("restaurant_edit_step") == "rename":
         new_name = text
         old_name = context.user_data.get("selected_restaurant_to_edit")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("UPDATE restaurants SET name = ? WHERE name = ?", (new_name, old_name))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("UPDATE restaurants SET name = %s WHERE name = %s", (new_name, old_name))
+                    await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل اسم المطعم إلى: {new_name}")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل اسم المطعم: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل اسم المطعم: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل اسم المطعم.")
-
+    
         context.user_data.clear()
         return await start(update, context)
-
-    # تعديل معرف القناة
+    
+    # ✅ تعديل معرف القناة
     elif context.user_data.get("restaurant_edit_step") == "edit_channel":
         new_channel = text
         if not new_channel.startswith("@"):
             await update.message.reply_text("❌ يرجى إرسال معرف يبدأ بـ @")
             return
-
+    
         restaurant = context.user_data.get("selected_restaurant_to_edit")
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("UPDATE restaurants SET channel = ? WHERE name = ?", (new_channel, restaurant))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("UPDATE restaurants SET channel = %s WHERE name = %s", (new_channel, restaurant))
+                    await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل معرف القناة إلى: {new_channel}")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل معرف القناة: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل معرف القناة: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل معرف القناة.")
-
+    
         context.user_data.clear()
         return await start(update, context)
-
-    # تعديل وقت الفتح
+    
+    # ✅ تعديل وقت الفتح
     elif context.user_data.get("restaurant_edit_step") == "edit_open_hour":
         try:
             open_hour = float(text)
@@ -2131,8 +2139,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except ValueError:
             await update.message.reply_text("⚠️ أرسل رقم بين 0 و 24.")
             return
-
-    # تعديل وقت الإغلاق
+    
+    # ✅ تعديل وقت الإغلاق
     elif context.user_data.get("restaurant_edit_step") == "edit_close_hour":
         try:
             close_hour = float(text)
@@ -2141,28 +2149,27 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except ValueError:
             await update.message.reply_text("⚠️ أرسل رقم بين 0 و 24.")
             return
-
+    
         open_hour = context.user_data.get("new_open_hour")
         restaurant = context.user_data.get("selected_restaurant_to_edit")
-
+    
         try:
             async with get_db_connection() as conn:
-
-                await conn.execute("""
-                    UPDATE restaurants SET open_hour = ?, close_hour = ?
-                    WHERE name = ?
-                """, (open_hour, close_hour, restaurant))
-                await conn.commit()
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        UPDATE restaurants SET open_hour = %s, close_hour = %s
+                        WHERE name = %s
+                    """, (open_hour, close_hour, restaurant))
+                    await conn.commit()
             await update.message.reply_text(f"✅ تم تعديل أوقات المطعم إلى {open_hour} - {close_hour}")
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء تعديل الأوقات: {e}")
+            logging.error(f"❌ خطأ أثناء تعديل الأوقات: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تعديل أوقات العمل.")
-
+    
         context.user_data.clear()
         return await start(update, context)
-
-
-    # 🧩 استقبال السعر في حالة "لا، لا يوجد قياسات"
+    
+    # ✅ استقبال السعر في حالة "لا، لا يوجد قياسات"
     elif context.user_data.get("add_meal_step") == "awaiting_single_price":
         try:
             price = int(text)
@@ -2172,15 +2179,15 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except ValueError:
             await update.message.reply_text("❌ السعر غير صالح. أرسل رقمًا فقط.")
         return
-
-    # 🧾 استقبال وصف الوجبة بعد القياسات أو السعر
+    
+    # ✅ استقبال وصف الوجبة بعد القياسات أو السعر
     elif context.user_data.get("add_meal_step") == "awaiting_caption":
         context.user_data["meal_caption"] = text
         context.user_data["add_meal_step"] = "awaiting_photo"
         await update.message.reply_text("📸 أرسل صورة الوجبة الآن:")
         return
-
-    # استقبال نص إعلان عادي
+    
+    # ✅ استقبال نص إعلان عادي
     elif context.user_data.get("ad_step") == "awaiting_ad_text":
         context.user_data["ad_text"] = text
         context.user_data["ad_step"] = "awaiting_ad_duration"
@@ -2192,7 +2199,8 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # استقبال مدة الإعلان أو تخطيها
+    
+     # ✅ استقبال مدة الإعلان أو تخطيها
     elif context.user_data.get("ad_step") == "awaiting_ad_duration":
         context.user_data["ad_duration"] = None if text == "تخطي ⏭️" else text
         context.user_data["ad_step"] = "awaiting_ad_media"
@@ -2201,20 +2209,20 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=ReplyKeyboardMarkup([["تخطي ⏭️"]], resize_keyboard=True)
         )
         return
-
-    # نشر الإعلان كنص فقط بعد تخطي الوسائط
+    
+    # ✅ نشر الإعلان كنص فقط بعد تخطي الوسائط
     elif context.user_data.get("ad_step") == "awaiting_ad_media" and text == "تخطي ⏭️":
         ad_text = context.user_data.get("ad_text")
         ad_city = context.user_data.get("ad_city")
         ad_restaurant = context.user_data.get("ad_restaurant")
         ad_duration = context.user_data.get("ad_duration")
         skip_restaurant = context.user_data.get("ad_skip_restaurant", False)
-
+    
         if not ad_text or not ad_city:
             await update.message.reply_text("⚠️ البيانات غير مكتملة. يرجى البدء من جديد.")
             context.user_data.clear()
             return await start(update, context)
-
+    
         # توليد نص الإعلان النهائي
         if skip_restaurant:
             full_text = ad_text
@@ -2229,16 +2237,17 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
             restaurant_encoded = quote(ad_restaurant)
             url = f"https://t.me/Fasterone1200_bot?start=go_{restaurant_encoded}"
             button = InlineKeyboardMarkup([[InlineKeyboardButton("🍽️ اطلب عالسريع 🍽️", url=url)]])
-
-        # إرسال إلى القنوات
+    
+        # إرسال الإعلان إلى القنوات
         try:
             async with get_db_connection() as conn:
-
-                if ad_city == "all":
-                    async with conn.execute("SELECT ads_channel FROM cities WHERE ads_channel IS NOT NULL") as cursor:
-                        channels = [row[0] async for row in cursor]
-                else:
-                    async with conn.execute("SELECT ads_channel FROM cities WHERE name = ?", (ad_city,)) as cursor:
+                async with conn.cursor() as cursor:
+                    if ad_city == "all":
+                        await cursor.execute("SELECT ads_channel FROM cities WHERE ads_channel IS NOT NULL")
+                        channels_data = await cursor.fetchall()
+                        channels = [row[0] for row in channels_data]
+                    else:
+                        await cursor.execute("SELECT ads_channel FROM cities WHERE name = %s", (ad_city,))
                         result = await cursor.fetchone()
                         if not result or not result[0]:
                             await update.message.reply_text("❌ لم يتم العثور على قناة المدينة.")
@@ -2246,31 +2255,70 @@ async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE)
                             return await start(update, context)
                         channels = [result[0]]
         except Exception as e:
-            logging.error(f"❌ خطأ أثناء جلب القنوات: {e}")
+            logging.error(f"❌ خطأ أثناء جلب القنوات: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء إرسال الإعلان.")
             return await start(update, context)
-
+    
         for channel in channels:
             try:
                 await context.bot.send_message(chat_id=channel, text=full_text, parse_mode="Markdown", reply_markup=button)
             except Exception as e:
                 logging.warning(f"⚠️ فشل في إرسال الإعلان إلى {channel}: {e}")
-
+    
         await update.message.reply_text("✅ تم نشر الإعلان كنص فقط بدون وسائط.")
         context.user_data.clear()
         return await start(update, context)
-
-    # استقبال نص زر الإعلان الذهبي
+    
+    # ✅ استقبال نص زر الإعلان الذهبي
     elif context.user_data.get("ad_step") == "awaiting_vip_button_text":
         context.user_data["vip_button_text"] = None if text == "تخطي ⏭️" else text
         context.user_data["ad_step"] = "awaiting_ad_text"
         await update.message.reply_text("📝 أرسل الآن نص الإعلان الذي تريد نشره:")
         return
-
+    
+    # ✅ حذف مطعم عبر إدخال الاسم يدويًا
+    elif context.user_data.get("restaurant_action") == "delete_restaurant" and "restaurant_name" not in context.user_data:
+        context.user_data["restaurant_name"] = text
+        city_name = context.user_data.get("selected_city_restaurant")
+    
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT r.id FROM restaurants r
+                        JOIN cities c ON r.city_id = c.id
+                        WHERE r.name = %s AND c.name = %s
+                    """, (text, city_name))
+                    result = await cursor.fetchone()
+    
+                    if not result:
+                        await update.message.reply_text("❌ لم يتم العثور على المطعم بهذا الاسم في المدينة المحددة.")
+                        context.user_data.clear()
+                        return
+    
+                    restaurant_id = result[0]
+    
+                    await cursor.execute("DELETE FROM meals WHERE category_id IN (SELECT id FROM categories WHERE restaurant_id = %s)", (restaurant_id,))
+                    await cursor.execute("DELETE FROM categories WHERE restaurant_id = %s", (restaurant_id,))
+                    await cursor.execute("DELETE FROM restaurant_ratings WHERE restaurant_id = %s", (restaurant_id,))
+                    await cursor.execute("DELETE FROM restaurants WHERE id = %s", (restaurant_id,))
+                    await conn.commit()
+    
+            await update.message.reply_text(f"🗑️ تم حذف المطعم '{text}' بنجاح.")
+            context.user_data.clear()
+            return
+    
+        except Exception as e:
+            logging.error(f"❌ خطأ أثناء حذف المطعم يدويًا: {e}", exc_info=True)
+            await update.message.reply_text("❌ حدث خطأ أثناء حذف المطعم.")
+            context.user_data.clear()
+            return
+    
     # 🛑 نص غير متوقع
     else:
         logging.warning("⚠️ لم يتم تحديد نوع التعديل الصحيح.")
         await update.message.reply_text("❌ لا يمكن تحديد نوع التعديل. يرجى البدء من جديد.")
+
 
 async def manage_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4687,6 +4735,7 @@ async def handle_user_search(update, context):
 
     info = get_user_full_info(query)  # تأكد من أن هذه الدالة موجودة لديك
     await update.message.reply_text(info, parse_mode=ParseMode.MARKDOWN)
+    
 async def handle_export_users(update, context):
     query = update.callback_query
     await query.answer()
@@ -4717,6 +4766,7 @@ async def handle_export_users(update, context):
 
     except Exception as e:
         await query.edit_message_text(f"❌ حدث خطأ أثناء التصدير: {e}")
+        
 async def handle_export_orders(update, context):
     query = update.callback_query
     await query.answer()
