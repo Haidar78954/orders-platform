@@ -1524,8 +1524,19 @@ async def handle_close_hour(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text_inputs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
+# ✅ دعم أمر /start أثناء العملية: إعادة التشغيل
+    if text == "/start":
+        context.user_data.clear()
+        return await start(update, context)
+
+    # ✅ دعم الإلغاء اليدوي للعملية الحالية
+    elif text.lower() in ["إلغاء", "cancel", "exit", "إلغاء الأمر", "خروج"]:
+        context.user_data.clear()
+        await update.message.reply_text("✅ تم إلغاء العملية الحالية.\nأرسل /start للبدء من جديد.")
+        return
+
     # ✅ تعديل قناة الإعلانات
-    if context.user_data.get("city_action") == "edit_ads_channel":
+    elif context.user_data.get("city_action") == "edit_ads_channel":
         new_channel = text
         city = context.user_data.get("city_to_edit_ads_channel")
 
