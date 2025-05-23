@@ -4402,21 +4402,19 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
 
 
 
-
-
 async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     message = update.message
 
-    # ✅ إعادة تهيئة الجلسة للمطور
+    # ✅ إعادة تهيئة الجلسة يدويًا للمبرمج
     if message and message.text and message.text.strip() in ["/start", "/start force404"]:
         print(f"🔁 تم طلب إعادة تشغيل من المستخدم {user_id}")
         context.user_data.clear()
-        context.chat_data.clear()  # مفيد في بعض الحالات
+        context.chat_data.clear()
         await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇")
         return await start(update, context)
 
-    # ✅ بارامترات الإعلانات
+    # ✅ معالجة بارامترات الإعلانات
     if message and message.text and message.text.startswith("/start "):
         arg = message.text.split("/start ", 1)[1].strip()
         print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
@@ -4427,11 +4425,9 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return ConversationHandler.END
         context.user_data["last_ad_click_time"] = now
 
-        # ✅ إعلان go_ لعرض مطعم محدد
         if arg.startswith("go_"):
             restaurant_name = arg.replace("go_", "").strip()
             context.user_data["go_ad_restaurant_name"] = restaurant_name
-
             await message.reply_text(
                 "📢 *يالله عالسرييع 🔥*\n\n"
                 "وصلت من إعلان، لتكمل:\n"
@@ -4442,7 +4438,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return ConversationHandler.END
 
-        # ✅ إعلان VIP
         elif arg.startswith("vip_"):
             try:
                 _, city_id_str, restaurant_id_str = arg.split("_", 2)
@@ -4478,10 +4473,11 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await message.reply_text("⚠️ هذا النوع من الإعلانات غير مدعوم.")
             return ConversationHandler.END
 
-    # ✅ البداية العادية
+    # ✅ البداية العادية بدون بارامتر
     else:
         print(f"handle_ad_start: Plain /start detected for user {user_id}.")
         return await start(update, context)
+
 
 
 
@@ -4589,7 +4585,8 @@ ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, A
 
 
 conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", handle_ad_start)],
+    entry_points=[CommandHandler("start", handle_ad_start),
+    MessageHandler(filters.Regex("^/start force404$"), handle_ad_start)],
     states={
         ASK_INFO: [
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
