@@ -792,10 +792,11 @@ async def handle_back_to_info(update: Update, context: CallbackContext) -> int:
     """
     معالجة خيار العودة من مرحلة الاسم إلى المرحلة الأولى.
     """
-    reply_markup = ReplyKeyboardMarkup([
-        ["ليش هالأسئلة ؟ 🧐 "],
+   reply_markup=ReplyKeyboardMarkup([
+        ["ليش هالأسئلة ؟ 🧐"],
         ["خلينا نبلش 😁"]
     ], resize_keyboard=True)
+)
 
     await update.message.reply_text(
         "تم الرجوع إلى البداية. يمكنك الآن اختيار أحد الخيارات التالية:",
@@ -909,7 +910,7 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("وهي سجلنا رقمك 🙂")
 
         # ⏱️ انتظر ثانية واحدة
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
         # 📨 الرسالة التي تريد إرسالها بعد التأخير
         await update.message.reply_text("مارح نعطيه لحدا 😃")
@@ -1037,7 +1038,7 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
             reply_markup=reply_markup
         )
         # ⏱️ انتظر ثانية واحدة
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
         # 📨 الرسالة التي تريد إرسالها بعد التأخير
         await update.message.reply_text("رح نشوف اسم مدينتك ونجي لندك باقرب وقت 🫡")
@@ -1063,17 +1064,17 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
         reply_markup=reply_markup
     )
     # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("ما بدا شي 😄")
@@ -1186,17 +1187,17 @@ async def ask_location(update: Update, context: CallbackContext) -> int:
         reply_markup=reply_markup
     )
     # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
 
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("ما بدا شي 😄")
@@ -1219,7 +1220,7 @@ async def handle_location(update: Update, context: CallbackContext) -> int:
         # طلب الموقع الكتابي
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
         await update.message.reply_text(
-            "✅ تم استلام الموقع. يرجى الآن كتابة وصف موقعك (مثل الشارع، العلامة القريبة).",
+            "تمام",
             reply_markup=reply_markup
         )
         return ASK_LOCATION_TEXT
@@ -1278,12 +1279,12 @@ async def ask_area_name(update: Update, context: CallbackContext) -> int:
         "📍 ما اسم المنطقة أو الشارع الذي تسكن فيه ضمن مدينتك؟\n"
         "مثلاً: الزراعة، شارع القلعة، أو قرب مدرسة كذا..."
     )
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("بدك تنتبه ! اذا كان موقعك ناقص او وهمي رح تنرفض طلبياتك 😥")
     
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("سجل موقعك منيح لمرة وحدة بس مشان تريح حالك بعدين 🙂")
@@ -1297,7 +1298,7 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     await update.message.reply_text(
         "وين بالضبط ؟ 🤨"
     )
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
@@ -1305,6 +1306,15 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     
     return ASK_DETAILED_LOCATION
 
+async def handle_area_name(update: Update, context: CallbackContext) -> int:
+    area_name = update.message.text.strip()
+    context.user_data["temporary_area_name"] = area_name
+
+    await update.message.reply_text("وين بالضبط ؟ 🤨")
+    await asyncio.sleep(2)
+    await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
+
+    return ASK_DETAILED_LOCATION
 
 
 
@@ -1409,7 +1419,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
                 "هلا صار فيك تطلب عالسريع 🔥",
                 reply_markup=reply_markup
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
             # 📨 الرسالة الثانية بعد ثانية
             await update.message.reply_text("وأيمت ما بدك فيك تعدل معلوماتك 🌝")
@@ -4579,7 +4589,7 @@ conv_handler = ConversationHandler(
     entry_points=[CommandHandler("start", handle_ad_start)],
     states={
         ASK_INFO: [
-            MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐 $"), ask_info_details),
+            MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
             MessageHandler(filters.Regex("^من نحن 🏢$"), about_us),
             MessageHandler(filters.Regex("^أسئلة متكررة ❓$"), handle_faq_entry),
             MessageHandler(filters.Regex("^خلينا نبلش 😁$"), ask_name)
@@ -4602,13 +4612,14 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
         ],
         ASK_AREA_NAME: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_detailed_location),
-            MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_area_name),
+        MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
         ],
         ASK_DETAILED_LOCATION: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_info),
-            MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_info),
+        MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
         ],
+
         CONFIRM_INFO: [
             MessageHandler(filters.Regex("اي ولو 😏"), handle_confirmation),
             MessageHandler(filters.Regex("لا بدي عدل 😐"), start)
