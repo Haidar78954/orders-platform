@@ -787,16 +787,14 @@ async def ask_name(update: Update, context: CallbackContext) -> int:
 
 
 
-
 async def handle_back_to_info(update: Update, context: CallbackContext) -> int:
     """
     معالجة خيار العودة من مرحلة الاسم إلى المرحلة الأولى.
     """
-   reply_markup=ReplyKeyboardMarkup([
+    reply_markup = ReplyKeyboardMarkup([
         ["ليش هالأسئلة ؟ 🧐"],
         ["خلينا نبلش 😁"]
     ], resize_keyboard=True)
-)
 
     await update.message.reply_text(
         "تم الرجوع إلى البداية. يمكنك الآن اختيار أحد الخيارات التالية:",
