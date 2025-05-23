@@ -4405,12 +4405,18 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
 
 
 
-
 async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     message = update.message
 
-    if message and message.text and message.text.startswith("/start "):  # يحتوي على بارامتر
+    # ✅ دعم إعادة التشغيل الإجباري أثناء الصيانة
+    if message and message.text == "/start force404":
+        context.user_data.clear()
+        await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nسنبدأ من جديد 😄👇")
+        return await start(update, context)
+
+    # ✅ عند وجود باراميتر
+    if message and message.text and message.text.startswith("/start "):
         arg = message.text.split("/start ", 1)[1].strip()
         print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
 
@@ -4420,11 +4426,10 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return ConversationHandler.END
         context.user_data["last_ad_click_time"] = now
 
-        # ✅ إعلان go_ لعرض مطعم محدد ضمن القائمة
+        # إعلان go_
         if arg.startswith("go_"):
-            # استخراج اسم المطعم وإبراز اسمه لاحقًا في "اطلب عالسريع 🔥"
             restaurant_name = arg.replace("go_", "").strip()
-            context.user_data["go_ad_restaurant_name"] = restaurant_name  # سيتم استخدامه لاحقًا
+            context.user_data["go_ad_restaurant_name"] = restaurant_name
 
             await message.reply_text(
                 "📢 *يالله عالسرييع 🔥*\n\n"
@@ -4436,14 +4441,15 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return ConversationHandler.END
 
-        # ✅ إعلان VIP
+        # إعلان vip_
         elif arg.startswith("vip_"):
             try:
                 _, city_id_str, restaurant_id_str = arg.split("_", 2)
                 city_id = int(city_id_str)
 
-                async with aiosqlite.connect("database.db") as db:
-                    async with db.execute("SELECT city_id FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                async with get_db_connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
                         row = await cursor.fetchone()
 
                 if not row:
@@ -4454,7 +4460,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
                     return ConversationHandler.END
 
-                # ✅ كل شيء صحيح - يمكن بدء تدفق عرض VIP
                 context.user_data["selected_restaurant_id"] = int(restaurant_id_str)
                 context.user_data["orders"] = []
                 return await show_restaurant_categories(update, context, from_ad=True)
@@ -4468,11 +4473,11 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await message.reply_text("❌ حدث خطأ أثناء معالجة الإعلان.")
                 return ConversationHandler.END
 
-        # ⛔️ رابط غير معروف
         else:
             await message.reply_text("⚠️ هذا النوع من الإعلانات غير مدعوم.")
             return ConversationHandler.END
 
+    # ✅ الوضع العادي بدون أي باراميتر
     else:
         print(f"handle_ad_start: Plain /start detected for user {user_id}.")
         return await start(update, context)
