@@ -4404,18 +4404,17 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
 
 
 
-
 async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     message = update.message
 
-    # ✅ دعم إعادة التشغيل الإجباري أثناء الصيانة
-    if message and message.text == "/start force404":
+    # ✅ إعادة البداية القسرية للتطوير أو الصيانة
+    if message and message.text.strip() == "/start force404":
         context.user_data.clear()
         await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nسنبدأ من جديد 😄👇")
         return await start(update, context)
 
-    # ✅ عند وجود باراميتر
+    # ✅ بارامترات الإعلانات
     if message and message.text and message.text.startswith("/start "):
         arg = message.text.split("/start ", 1)[1].strip()
         print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
@@ -4426,7 +4425,7 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return ConversationHandler.END
         context.user_data["last_ad_click_time"] = now
 
-        # إعلان go_
+        # ✅ إعلان go_ لعرض مطعم محدد
         if arg.startswith("go_"):
             restaurant_name = arg.replace("go_", "").strip()
             context.user_data["go_ad_restaurant_name"] = restaurant_name
@@ -4441,7 +4440,7 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return ConversationHandler.END
 
-        # إعلان vip_
+        # ✅ إعلان VIP
         elif arg.startswith("vip_"):
             try:
                 _, city_id_str, restaurant_id_str = arg.split("_", 2)
@@ -4477,11 +4476,10 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await message.reply_text("⚠️ هذا النوع من الإعلانات غير مدعوم.")
             return ConversationHandler.END
 
-    # ✅ الوضع العادي بدون أي باراميتر
+    # ✅ البداية العادية
     else:
         print(f"handle_ad_start: Plain /start detected for user {user_id}.")
         return await start(update, context)
-
 
 
 
@@ -4729,7 +4727,9 @@ def run_user_bot () :
     
     # المعالجات
     application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", handle_ad_start))
+
+    
     application.add_handler(CommandHandler("testimage", test_copy_image))
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
