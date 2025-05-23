@@ -4408,10 +4408,12 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     message = update.message
 
-    # ✅ إعادة البداية القسرية للتطوير أو الصيانة
-    if message and message.text.strip() == "/start force404":
+    # ✅ إعادة تهيئة الجلسة للمطور
+    if message and message.text and message.text.strip() in ["/start", "/start force404"]:
+        print(f"🔁 تم طلب إعادة تشغيل من المستخدم {user_id}")
         context.user_data.clear()
-        await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nسنبدأ من جديد 😄👇")
+        context.chat_data.clear()  # مفيد في بعض الحالات
+        await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇")
         return await start(update, context)
 
     # ✅ بارامترات الإعلانات
