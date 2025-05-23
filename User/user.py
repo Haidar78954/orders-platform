@@ -4571,7 +4571,45 @@ def reset_order_counters():
     db_conn.commit()
 
 
-
+async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    أمر خاص للمطور لإعادة تعيين بيانات المستخدم وحالة المحادثة
+    يستخدم فقط من قبل المطور للاختبار بعد صيانة الكود
+    """
+    user_id = update.effective_user.id
+    
+    # مسح بيانات المستخدم من الذاكرة المؤقتة
+    context.user_data.clear()
+    
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                # حذف حالة المحادثة
+                await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
+                
+                # حذف سلة التسوق
+                await cursor.execute("DELETE FROM shopping_carts WHERE user_id = %s", (user_id,))
+                
+                # حذف بيانات المستخدم (اختياري - يمكن تعليق هذا السطر إذا كنت تريد الاحتفاظ ببيانات التسجيل الأساسية)
+                await cursor.execute("DELETE FROM user_data WHERE user_id = %s", (user_id,))
+                
+                # حذف أي بيانات أخرى مرتبطة بالمستخدم (أضف المزيد حسب الحاجة)
+                # مثال: await cursor.execute("DELETE FROM user_orders WHERE user_id = %s", (user_id,))
+                
+            await conn.commit()
+            
+        await update.message.reply_text(
+            "✅ تم إعادة تعيين بياناتك بنجاح!\n"
+            "يمكنك الآن استخدام البوت كمستخدم جديد."
+        )
+        
+        # إعادة توجيه المستخدم إلى بداية المحادثة
+        return await start(update, context)
+        
+    except Exception as e:
+        logger.error(f"خطأ في إعادة تعيين بيانات المطور: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء إعادة تعيين البيانات. يرجى المحاولة مرة أخرى.")
+        return MAIN_MENU
 
 
 
@@ -4720,6 +4758,7 @@ def run_user_bot () :
 
     
 
+    application.add_handler(CommandHandler("start_dev_reset1147", dev_reset))
     
 
     # المعالجات
