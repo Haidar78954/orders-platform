@@ -2960,7 +2960,7 @@ async def process_confirm_final_order(update, context):
             await delete_cart_from_db(user_id)
 
             reply_markup = ReplyKeyboardMarkup([
-                ["إلغاء ❌ أريد تعديل الطلب"],
+                ["إلغاء ❌ بدي عدل"],
                 ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
             ], resize_keyboard=True)
 
@@ -3105,10 +3105,11 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
     for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
         context.user_data.pop(key, None)
 
-    # 💬 رسالة الشكر                                                   
+    # 💬 رسالة شكر وتقييم
     await update.message.reply_text(
-        "🙏 شكراً لك! سعيدون بخدمتك ❤️\n"
-        "نتمنى أن تكون استمتعت بطلبك 🍽️ ونتطلع لخدمتك مجددًا!"
+        "حلوو 😍\n"
+        "الله جعله صحةة 😘\n\n"
+        "كم نجمة حابب تعطيه للمطعم 🤩\n\n"
     )
 
     # 🌟 عرض خيارات التقييم
@@ -3130,33 +3131,25 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
 
 
 
+
 async def handle_order_cancellation(update: Update, context: CallbackContext) -> int:
     order_data = context.user_data.get("order_data")
     if not order_data:
         await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
         return MAIN_MENU
 
-    order_timestamp = order_data.get("timestamp", datetime.now())
-    time_elapsed = (datetime.now() - order_timestamp).total_seconds() / 60  # بالدقائق
-
-    if time_elapsed > 10:
-        await update.message.reply_text(
-            "😅 عذرًا، لقد مر أكثر من 10 دقائق على طلبك وبدأ تحضيره بالفعل. لا يمكنك إلغاء الطلب الآن."
-        )
-        return MAIN_MENU
-
     reply_markup = ReplyKeyboardMarkup([
-        ["تأكيد الإلغاء ❌"],
-        ["العودة والانتظار رسالة بدأ التحضير 😃"]
+        ["اي اي متاكد 🥱"],
+        ["معلش رجعني 🙃"]
     ], resize_keyboard=True)
 
     await update.message.reply_text(
-        "هل أنت متأكد أنك تريد إلغاء الطلب؟\n"
-        "اختر أحد الخيارات:",
+        "متاكد ؟ 🫤",
         reply_markup=reply_markup
     )
 
     return CANCEL_ORDER_OPTIONS
+
 
 
 
@@ -3171,7 +3164,7 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
         await update.message.reply_text("❌ لم يتم العثور على تفاصيل الطلب. يمكنك البدء بطلب جديد.")
         return MAIN_MENU
 
-    if choice == "تأكيد الإلغاء ❌":
+    if choice == "اي اي متاكد 🥱":
         now = datetime.now()
 
         # ✅ سجل وقت الإلغاء مع تنظيف الإدخالات الأقدم من ساعة
@@ -3184,13 +3177,13 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
         ]
         context.user_data["cancel_history"].append(now)
 
-    elif choice == "العودة والانتظار رسالة بدأ التحضير 😃":
+    elif choice == "معلش رجعني 🙃":
         reply_markup = ReplyKeyboardMarkup([
-            ["إلغاء ❌ أريد تعديل الطلب"],
+            ["إلغاء ❌ بدي عدل"],
             ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
-            "👌 تم الرجوع إلى الخيارات السابقة. اختر ما تريد:",
+            "رجعنا 😌",
             reply_markup=reply_markup
         )
         return CANCEL_ORDER_OPTIONS
@@ -3264,7 +3257,7 @@ async def handle_cancellation_reason(update: Update, context: CallbackContext) -
         ["من نحن 🏢", "أسئلة متكررة ❓"]
     ], resize_keyboard=True)
     await update.message.reply_text(
-        "✅ تم إلغاء طلبك بنجاح. يمكنك الآن البدء بطلب جديد.",
+        "ألغينالك الطلب ، اذا في مشكلة حكينا 🫠",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -3287,26 +3280,27 @@ async def handle_no_confirmation(update: Update, context: CallbackContext) -> in
 
     if time_elapsed < 5:
         reply_markup = ReplyKeyboardMarkup([
-            ["إلغاء ❌ أريد تعديل الطلب"],
+            ["إلغاء ❌ بدي عدل"],
             ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
-            "نعتذر منك عليك الانتظار 5 دقائق 🙏🏻\n"
-            "طلبك وصل مباشرة إلى المطعم لكن قد يكون هناك طلبات سابقة 😶",
+            "حبيبي بدك تطول بالك 5 دقايق عالأقل 🤧\n"
+            "ممكن في زحمة طلبات قبلك 🫨",
             reply_markup=reply_markup
         )
         return MAIN_MENU
 
     # إذا مر أكثر من 5 دقائق
     reply_markup = ReplyKeyboardMarkup([
-        ["تذكير المطعم 🫡"],
-        ["إلغاء الطلب لقد تأخروا بالرد ❌"],
+        ["ذكرلي المطعم بطلبي 🙋"],
+        ["تأخرو كتير إلغاء عالسريع 😡"],
     ], resize_keyboard=True)
     await update.message.reply_text(
-        "لقد مر أكثر من 5 دقائق.\n"
-        "اختر أحد الخيارات التالية:",
+        "شكله المطعم مشغول، نحن عملنا يلي علينا وطلبك وصل عالسريع 🔥\n"
+        "بتحب فيك تنكشو للكاشير أو فيك تشوف مطعم غيره 😊",
         reply_markup=reply_markup
     )
+
     return CANCEL_ORDER_OPTIONS
 
 
@@ -3321,7 +3315,7 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
 
     if context.user_data.get("reminder_sent", False):
         await update.message.reply_text(
-            "❌ لقد قمت بالفعل بإرسال تذكير للمطعم. لا يمكنك إرسال تذكير آخر الآن."
+            "فيك تذكر مرة بس 😔"
         )
         return MAIN_MENU
 
@@ -3349,7 +3343,7 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
             chat_id=restaurant_channel,
             text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. نرجو الاستعجال في التحضير 🙏.",
         )
-        await update.message.reply_text("✅ تم إرسال التذكير للمطعم بنجاح!")
+        await update.message.reply_text("حكينالك ياه لازم يستحي ع دمه 🤨")
     else:
         await update.message.reply_text("❌ لم يتم العثور على قناة المطعم أو رقم الطلب.")
 
@@ -3365,10 +3359,10 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
 async def handle_final_cancellation(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
 
-    if choice == "إلغاء الطلب لقد تأخروا بالرد ❌":
+    if choice == "تأخرو كتير إلغاء عالسريع 😡":
         reply_markup = ReplyKeyboardMarkup([
-            ["تأكيد الإلغاء ❌"],
-            ["العودة وانتظار رسالة بدأ التحضير 😃"]
+            ["اي اي متاكد 🥱"],
+            ["لا خلص منرجع ومننتظر 🥲"]
         ], resize_keyboard=True)
         await update.message.reply_text(
             "هل أنت متأكد أنك تريد إلغاء الطلب؟ اختر أحد الخيارات:",
@@ -3376,7 +3370,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
         )
         return CANCEL_ORDER_OPTIONS
 
-    elif choice == "تأكيد الإلغاء ❌":
+    elif choice == "اي اي متاكد 🥱":
         order_data = context.user_data.get("order_data")
         if not order_data:
             await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
@@ -3396,19 +3390,19 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
                 chat_id=restaurant_channel,
                 text=f"🚫 تم إلغاء الطلب رقم: {order_number} من قبل الزبون."
             )
-            await update.message.reply_text("✅ تم إلغاء طلبك بنجاح!")
+            await update.message.reply_text("ألغينالك الطلب ، اذا في مشكلة حكينا 🫠")
         else:
             await update.message.reply_text("❌ لم يتم العثور على قناة المطعم.")
 
         return MAIN_MENU
 
-    elif choice == "العودة وانتظار رسالة بدأ التحضير 😃":
+    elif choice == "لا خلص منرجع ومننتظر 🥲":
         reply_markup = ReplyKeyboardMarkup([
-            ["إلغاء ❌ أريد تعديل الطلب"],
+            ["إلغاء ❌ بدي عدل"],
             ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
-            "👌 تم الرجوع إلى الخيارات السابقة. اختر ما تريد:",
+            "صبرك الله 😄",
             reply_markup=reply_markup
         )
         return MAIN_MENU
@@ -3428,7 +3422,7 @@ async def handle_order_issue(update: Update, context: CallbackContext) -> int:
         "🛑 *هام جدا*:\n\n"
         "عند إلغاء الطلب يجب أن تكون متأكد أن السبب كان من المطعم (تأخير أو أي شيء آخر..). "
         "وفي هذه الحالة، سيصلنا تقرير مباشرة يحتوي على جميع المعلومات: ماذا طلبت، متى طلبت، ومتى ألغيت، وما المطعم الذي تم الطلب منه.\n\n"
-        "🛑 إذا كان الإلغاء من باب العبث أو المتعة وتم إثبات ذلك، سيتم حظرك نهائياً من البوت وملاحقتك قانونياً.\n\n"
+        "🛑 إذا كان الإلغاء من باب العبث بخدمتنا وتم إثبات ذلك، سيتم حظرك نهائياً من البوت وملاحقتك قانونياً.\n\n"
         "إجراءاتنا دائماً تهدف لخدمتك عزيزي/عزيزتي، وشكراً لتفهمك ❤️"
     )
 
@@ -3488,7 +3482,21 @@ async def handle_report_issue(update: Update, context: CallbackContext) -> int:
 
 
 async def handle_report_cancellation(update: Update, context: CallbackContext) -> int:
+    # ❗️تحويل المستخدم لسؤال السبب قبل الإرسال
+    return await ask_report_reason(update, context)
+
+
+async def ask_report_reason(update: Update, context: CallbackContext) -> int:
+    text = update.message.text.strip()
+
+    if text == "عودة ➡️":
+        return await handle_return_and_wait(update, context)
+
+    context.user_data["report_reason"] = text
+    context.user_data["cancel_step"] = None
+
     return await process_report_cancellation(update, context)
+
 
 async def process_report_cancellation(update: Update, context: CallbackContext) -> int:
     order_data = context.user_data.get("order_data")
@@ -3496,8 +3504,7 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
         await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
         return MAIN_MENU
 
-    reason = update.message.text
-    context.user_data["cancel_step"] = None  # تنظيف المرحلة
+    reason = context.user_data.get("report_reason", "لم يُذكر السبب.")
 
     user_id = update.effective_user.id
     name = context.user_data.get("name", "غير متوفر")
@@ -3508,7 +3515,7 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
     order_time = order_data.get("timestamp", datetime.now())
     cancel_time = datetime.now()
 
-    # إرسال تقرير إلى قناة الإدارة
+    # 📨 إرسال تقرير إلى قناة الإدارة
     report_message = (
         f"📝 تقرير إلغاء طلب:\n\n"
         f"👤 الزبون:\n"
@@ -3526,7 +3533,7 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
 
     await context.bot.send_message(chat_id="@reports_cancel", text=report_message)
 
-    # إشعار المطعم إن وُجد
+    # 📣 إشعار قناة المطعم
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
@@ -3549,10 +3556,11 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
             parse_mode="Markdown"
         )
 
-    # حذف البيانات المرتبطة
-    for key in ["order_data", "orders", "selected_restaurant"]:
+    # 🧹 حذف البيانات المؤقتة المرتبطة بالطلب
+    for key in ["order_data", "orders", "selected_restaurant", "report_reason"]:
         context.user_data.pop(key, None)
 
+    # ✅ عرض القائمة الرئيسية
     reply_markup = ReplyKeyboardMarkup([
         ["اطلب عالسريع 🔥"],
         ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
@@ -3565,16 +3573,6 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
     )
 
     return MAIN_MENU
-
-
-
-async def ask_report_reason(update: Update, context: CallbackContext) -> int:
-    context.user_data["cancel_step"] = "awaiting_report_reason"
-    await update.message.reply_text(
-        "❓ ما الذي جعلك تلغي الطلب؟\n"
-        "نقدّر ملاحظتك وسنرسلها مع التقرير إلى فريق الدعم."
-    )
-    return ASK_REPORT_REASON
 
 
 
@@ -3600,14 +3598,14 @@ async def handle_return_and_wait(update: Update, context: CallbackContext) -> in
 
 async def handle_order_cancellation_open(update: Update, context: CallbackContext) -> int:
         """
-        عرض خيارات الإلغاء المفتوح (إلغاء الطلب لقد تأخروا بالرد ❌) مع إضافة خيار مننطر اسا شوي 🤷.
+        عرض خيارات الإلغاء المفتوح (تأخرو كتير إلغاء عالسريع 😡) مع إضافة خيار مننطر اسا شوي 🤷.
         """
         choice = update.message.text
 
-        if choice == "إلغاء الطلب لقد تأخروا بالرد ❌":
+        if choice == "تأخرو كتير إلغاء عالسريع 😡":
             # عرض خيارات التأكيد أو الانتظار
             reply_markup = ReplyKeyboardMarkup([
-                ["تأكيد الإلغاء ❌"],
+                ["اي اي متاكد 🥱"],
                 ["مننطر اسا شوي 🤷"]
             ], resize_keyboard=True)
             await update.message.reply_text(
@@ -3616,7 +3614,7 @@ async def handle_order_cancellation_open(update: Update, context: CallbackContex
             )
             return CANCEL_ORDER_OPTIONS
 
-        elif choice == "تأكيد الإلغاء ❌":
+        elif choice == "اي اي متاكد 🥱":
             # تنفيذ عملية الإلغاء
             order_data = context.user_data.get("order_data")
             if not order_data:
@@ -3648,8 +3646,8 @@ async def handle_order_cancellation_open(update: Update, context: CallbackContex
         elif choice == "مننطر اسا شوي 🤷":
             # إعادة عرض الخيارات السابقة
             reply_markup = ReplyKeyboardMarkup([
-                ["تذكير المطعم 🫡"],
-                ["إلغاء الطلب لقد تأخروا بالرد ❌"]
+                ["ذكرلي المطعم بطلبي 🙋"],
+                ["تأخرو كتير إلغاء عالسريع 😡"]
             ], resize_keyboard=True)
             await update.message.reply_text(
                 "👌 عدنا إلى الخيارات السابقة. اختر ما تريد:",
@@ -3792,53 +3790,87 @@ async def ask_remaining_time(update: Update, context: CallbackContext) -> int:
     # بدء تذكير تلقائي بعد 5 دقائق
     asyncio.create_task(remind_cashier_after_delay(context, message.message_id, restaurant_channel))
 
-    await update.message.reply_text("✅ تم إرسال طلب معرفة الوقت إلى المطعم. سيتم إبلاغك عند الرد.")
+    await update.message.reply_text("سألتلك ياهن قدي اسا بدو طلبك ناطر منن جواب 😁")
     return CANCEL_ORDER_OPTIONS
 
 
 
 
 
+async def handle_remaining_time_for_order(update: Update, context: CallbackContext) -> int:
+    # 1️⃣ إذا كانت الرسالة من القناة (رد الكاشير)
+    if update.channel_post and update.channel_post.reply_to_message:
+        channel_post = update.channel_post
+        reply_to_message_id = channel_post.reply_to_message.message_id
+        logging.info(f"Reply to message ID: {reply_to_message_id}")
 
-async def handle_cashier_reply(update: Update, context: CallbackContext) -> None:
-    channel_post = update.channel_post
-    if not channel_post or not channel_post.reply_to_message:
-        logging.warning("Received a message that is not a reply.")
-        return
-
-    reply_to_message_id = channel_post.reply_to_message.message_id
-    logging.info(f"Reply to message ID: {reply_to_message_id}")
-
-    # التحقق من أن الرسالة الأصلية موجودة في bot_data
-    order_data = context.bot_data.get(reply_to_message_id)
-    if not order_data:
-        logging.warning(f"No order data found for reply_to_message_id: {reply_to_message_id}")
-        return
-
-    # استخراج المستخدم ورقم الطلب
-    user_id = order_data["user_id"]
-    order_number = order_data["order_number"]
-
-    # محاولة استخراج الرقم من رد الكاشير
-    try:
-        remaining_time = int(''.join(filter(str.isdigit, channel_post.text)))
-        if remaining_time < 0 or remaining_time > 150:  # تحقق من النطاق المقبول
-            await channel_post.reply_text("❌ يرجى إدخال رقم بين 0 و150 دقيقة.")
-            logging.warning(f"Invalid remaining time provided: {remaining_time}")
+        order_data = context.bot_data.get(reply_to_message_id)
+        if not order_data:
+            logging.warning(f"No order data found for reply_to_message_id: {reply_to_message_id}")
             return
-    except ValueError:
-        await channel_post.reply_text("❌ يرجى الرد برقم صحيح فقط.")
-        logging.error("Failed to extract a valid number from the cashier's reply.")
+
+        user_id = order_data["user_id"]
+        order_number = order_data["order_number"]
+
+        try:
+            remaining_time = int(''.join(filter(str.isdigit, channel_post.text)))
+            if remaining_time < 0 or remaining_time > 150:
+                await channel_post.reply_text("❌ يرجى إدخال رقم بين 0 و150 دقيقة.")
+                return
+        except ValueError:
+            await channel_post.reply_text("❌ يرجى الرد برقم صحيح فقط.")
+            return
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"بسلم عليك الكاشير وبقلك باقي لطلبيتك {remaining_time} دقيقة، ما بطول حبيبي 😘"
+        )
+        logging.info(f"✅ Notified user {user_id} with remaining time {remaining_time} for order {order_number}.")
         return
 
-    # إرسال الرسالة للمستخدم
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"⏳ متبقي لطلبك حوالي {remaining_time} دقيقة. شكراً لانتظارك!"
+    # 2️⃣ إذا كانت الرسالة من المستخدم في المحادثة
+    user_id = update.effective_user.id
+    order_data = context.user_data.get("order_data", {})
+    order_number = order_data.get("order_number", None)
+    selected_restaurant = order_data.get("selected_restaurant", None)
+
+    if not order_number or not selected_restaurant:
+        await update.message.reply_text("❌ لا يمكن العثور على رقم الطلب. يرجى المحاولة مرة أخرى.")
+        return MAIN_MENU
+
+    # استخراج قناة المطعم من قاعدة البيانات
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT channel FROM restaurants WHERE name = %s", (selected_restaurant,))
+                result = await cursor.fetchone()
+                restaurant_channel = result[0] if result else None
+    except Exception as e:
+        logging.error(f"❌ Database error while fetching restaurant channel: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء الوصول إلى بيانات المطعم.")
+        return MAIN_MENU
+
+    if not restaurant_channel:
+        await update.message.reply_text("❌ لا يمكن العثور على قناة المطعم.")
+        return MAIN_MENU
+
+    sent_message = await context.bot.send_message(
+        chat_id=restaurant_channel,
+        text=f"🔔 كم يتبقى لتحضير الطلب رقم {order_number}؟"
     )
-    logging.info(f"Extracted remaining time: {remaining_time} for order {order_number}. Notified user {user_id}.")
 
+    # تخزين الرسالة لربط الرد بها لاحقًا
+    context.bot_data[sent_message.message_id] = {
+        "user_id": user_id,
+        "order_number": order_number,
+        "selected_restaurant": selected_restaurant
+    }
 
+    # تفعيل تذكير تلقائي بعد 5 دقائق
+    asyncio.create_task(remind_cashier_after_delay(context, sent_message.message_id, restaurant_channel))
+
+    await update.message.reply_text("✅ سألتلك ياهن قديش بدو طلبك، ناطر منن جواب 😁")
+    return CANCEL_ORDER_OPTIONS
 
 
 
@@ -3854,41 +3886,6 @@ async def remind_cashier_after_delay(context: CallbackContext, message_id: int, 
             chat_id=restaurant_channel,
             text=f"⏰ تذكير: لم يتم الرد على طلب الزبون لمعرفة مدة التحضير للطلب رقم {order_number}. يرجى الرد."
         )
-
-
-
-
-
-async def handle_remaining_time_for_order(update: Update, context: CallbackContext) -> int:
-    user_id = update.effective_user.id
-    order_number = context.user_data.get("order_data", {}).get("order_number", None)
-
-    if not order_number:
-        await update.message.reply_text("❌ لا يمكن العثور على رقم الطلب. يرجى المحاولة مرة أخرى.")
-        return MAIN_MENU
-
-    restaurant_channel = restaurant_channels.get(context.user_data.get("selected_restaurant", None))
-    if not restaurant_channel:
-        await update.message.reply_text("❌ حدث خطأ: لا يمكن العثور على قناة المطعم.")
-        return MAIN_MENU
-
-    # إرسال طلب "كم يتبقى لطلبي" إلى قناة المطعم
-    message_text = f"كم يتبقى لتحضير الطلب رقم {order_number}؟"
-    sent_message = await context.bot.send_message(
-        chat_id=restaurant_channel,
-        text=message_text
-    )
-
-    # تسجيل البيانات لربط الرد بالمستخدم
-    context.bot_data[sent_message.message_id] = {
-        "user_id": user_id,
-        "order_number": order_number
-    }
-    logging.info(f"Sent 'remaining time' request for order {order_number} to channel. Message ID: {sent_message.message_id}")
-
-    await update.message.reply_text("✅ تم إرسال طلبك لمعرفة المدة المتبقية لتحضير الطلب.")
-    return CANCEL_ORDER_OPTIONS
-
 
 
 
@@ -4638,11 +4635,11 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
-            MessageHandler(filters.Regex("إلغاء الطلب لقد تأخروا بالرد ❌"), handle_order_cancellation_open),
-            MessageHandler(filters.Regex("تذكير المطعم 🫡"), handle_reminder),
+            MessageHandler(filters.Regex("تأخرو كتير إلغاء عالسريع 😡"), handle_order_cancellation_open),
+            MessageHandler(filters.Regex("ذكرلي المطعم بطلبي 🙋"), handle_reminder),
             MessageHandler(filters.Regex("تذكير المطعم بطلبي 👋"), handle_reminder_order_request),
             MessageHandler(filters.Regex("كم يتبقى لطلبي"), ask_remaining_time),
-            MessageHandler(filters.Regex("إلغاء ❌ أريد تعديل الطلب"), handle_order_cancellation)
+            MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation)
         ],
         EDIT_FIELD_CHOICE: [
     MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
@@ -4689,20 +4686,20 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("عودة ⬅️"), ask_new_location)
         ],
         CANCEL_ORDER_OPTIONS: [
-            MessageHandler(filters.Regex("تذكير المطعم 🫡"), handle_reminder),
+            MessageHandler(filters.Regex("ذكرلي المطعم بطلبي 🙋"), handle_reminder),
             MessageHandler(filters.Regex("تذكير المطعم بطلبي 👋"), handle_reminder_order_request),
-            MessageHandler(filters.Regex("إلغاء الطلب لقد تأخروا بالرد ❌"), handle_order_cancellation_open),
+            MessageHandler(filters.Regex("تأخرو كتير إلغاء عالسريع 😡"), handle_order_cancellation_open),
             MessageHandler(filters.Regex("كم يتبقى لطلبي"), handle_remaining_time_for_order),
             MessageHandler(filters.Regex("إلغاء وإرسال تقرير ❌"), handle_report_issue),
             MessageHandler(filters.Regex("إلغاء وإنشاء تقرير ❌"), ask_report_reason),
             MessageHandler(filters.Regex("منرجع ومننطر 🙃"), handle_return_and_wait),
             MessageHandler(filters.Regex("العودة والانتظار 🙃"), handle_back_and_wait),
             MessageHandler(filters.Regex("إلغاء متأكد ❌"), handle_confirm_cancellation),
-            MessageHandler(filters.Regex("تأكيد الإلغاء ❌"), handle_confirm_cancellation),
+            MessageHandler(filters.Regex("اي اي متاكد 🥱"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("مننطر اسا شوي 🤷"), handle_order_cancellation_open),
-            MessageHandler(filters.Regex("إلغاء ❌ أريد تعديل الطلب"), handle_order_cancellation),
+            MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
-            MessageHandler(filters.Regex("العودة والانتظار رسالة بدأ التحضير 😃"), handle_confirm_cancellation),
+            MessageHandler(filters.Regex("معلش رجعني 🙃"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cancellation_reason)
@@ -4740,22 +4737,28 @@ def run_user_bot () :
 
     
     application.add_handler(CommandHandler("testimage", test_copy_image))
-    application.add_handler(MessageHandler(
-        filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
-        handle_report_based_cancellation
-    ))
-    application.add_handler(MessageHandler(
-        filters.ChatType.CHANNEL & filters.Regex(r"تم رفض الطلب.*معرف الطلب"),
-        handle_order_rejection_notice
-    ))
+    application.add_handler(ChannelPostHandler(handle_remaining_time_for_order))  # 🟢 هذا يجب أن يكون أولاً
+
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"تم تسليم الطلب.*معرف الطلب"),
         handle_delivery_assignment
     ))
+    
+    application.add_handler(MessageHandler(
+        filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
+        handle_report_based_cancellation
+    ))
+    
+    application.add_handler(MessageHandler(
+        filters.ChatType.CHANNEL & filters.Regex(r"تم رفض الطلب.*معرف الطلب"),
+        handle_order_rejection_notice
+    ))
+    
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.TEXT,
-        handle_cashier_interaction
+        handle_cashier_interaction  # 🟥 هذا يجب أن يبقى أخيراً لأنه broad filter
     ))
+
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
         handle_vip_broadcast_message
