@@ -4402,33 +4402,12 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
 
 
 
+
 async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     message = update.message
 
-    print(f"🔁 /start من المستخدم {user_id} - إعادة تشغيل إجبارية")
-
-    # مسح بيانات الجلسة
-    context.user_data.clear()
-    context.chat_data.clear()
-
-    # (اختياري) حذف من conversation_states
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
-            await conn.commit()
-    except Exception as e:
-        logging.error(f"❌ فشل حذف session من DB: {e}", exc_info=True)
-
-    await message.reply_text(
-        "🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇"
-    )
-    return await start(update, context)
-
-
-    # ✅ معالجة بارامترات الإعلانات
-    if message and message.text and message.text.startswith("/start "):
+    if message and message.text and message.text.startswith("/start "):  # يحتوي على بارامتر
         arg = message.text.split("/start ", 1)[1].strip()
         print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
 
@@ -4438,9 +4417,12 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return ConversationHandler.END
         context.user_data["last_ad_click_time"] = now
 
+        # ✅ إعلان go_ لعرض مطعم محدد ضمن القائمة
         if arg.startswith("go_"):
+            # استخراج اسم المطعم وإبراز اسمه لاحقًا في "اطلب عالسريع 🔥"
             restaurant_name = arg.replace("go_", "").strip()
-            context.user_data["go_ad_restaurant_name"] = restaurant_name
+            context.user_data["go_ad_restaurant_name"] = restaurant_name  # سيتم استخدامه لاحقًا
+
             await message.reply_text(
                 "📢 *يالله عالسرييع 🔥*\n\n"
                 "وصلت من إعلان، لتكمل:\n"
@@ -4451,14 +4433,14 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return ConversationHandler.END
 
+        # ✅ إعلان VIP
         elif arg.startswith("vip_"):
             try:
                 _, city_id_str, restaurant_id_str = arg.split("_", 2)
                 city_id = int(city_id_str)
 
-                async with get_db_connection() as conn:
-                    async with conn.cursor() as cursor:
-                        await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
+                async with aiosqlite.connect("database.db") as db:
+                    async with db.execute("SELECT city_id FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
                         row = await cursor.fetchone()
 
                 if not row:
@@ -4469,6 +4451,7 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
                     return ConversationHandler.END
 
+                # ✅ كل شيء صحيح - يمكن بدء تدفق عرض VIP
                 context.user_data["selected_restaurant_id"] = int(restaurant_id_str)
                 context.user_data["orders"] = []
                 return await show_restaurant_categories(update, context, from_ad=True)
@@ -4482,14 +4465,15 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await message.reply_text("❌ حدث خطأ أثناء معالجة الإعلان.")
                 return ConversationHandler.END
 
+        # ⛔️ رابط غير معروف
         else:
             await message.reply_text("⚠️ هذا النوع من الإعلانات غير مدعوم.")
             return ConversationHandler.END
 
-    # ✅ البداية العادية بدون بارامتر
     else:
         print(f"handle_ad_start: Plain /start detected for user {user_id}.")
         return await start(update, context)
+
 
 
 
@@ -4598,8 +4582,7 @@ ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, A
 
 
 conv_handler = ConversationHandler(
-    #entry_points=[CommandHandler("start", handle_ad_start),
-    #MessageHandler(filters.Regex("^/start force404$"), handle_ad_start)],
+    entry_points=[CommandHandler("start", handle_ad_start)],
     states={
         ASK_INFO: [
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
@@ -4741,7 +4724,7 @@ def run_user_bot () :
 
     # المعالجات
     application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("start", handle_ad_start))
+    application.add_handler(CommandHandler("start", start))
 
     
     application.add_handler(CommandHandler("testimage", test_copy_image))
