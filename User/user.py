@@ -775,6 +775,20 @@ async def ask_info_details(update: Update, context: CallbackContext) -> int:
     )
     return ASK_INFO
 
+async def handle_info_selection(update: Update, context: CallbackContext) -> int:
+    text = update.message.text.strip()
+    if text == "ليش هالأسئلة ؟ 🧐":
+        return await ask_info_details(update, context)
+    elif text == "خلينا نبلش 😁":
+        return await ask_name(update, context)
+    else:
+        # حماية من النصوص غير المتوقعة
+        reply_markup = ReplyKeyboardMarkup([
+            ["ليش هالأسئلة ؟ 🧐"],
+            ["خلينا نبلش 😁"]
+        ], resize_keyboard=True)
+        await update.message.reply_text("حبيبي اختار من الخيارات يلي تحت 👇", reply_markup=reply_markup)
+        return ASK_INFO
 
 
 
@@ -955,11 +969,18 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
 
 
 async def handle_province(update: Update, context: CallbackContext) -> int:
-    province = update.message.text
+    province = update.message.text.strip()
 
+    # 🟡 عودة ← نرجع إلى خطوة إدخال رقم الهاتف
     if province == "عودة ➡️":
         context.user_data.pop('phone', None)
         return await ask_phone(update, context)
+
+    # 🛡️ تحقق من الإدخال غير المتوقع
+    if province not in context.user_data.get("valid_provinces", []):
+        reply_markup = ReplyKeyboardMarkup([[p] for p in context.user_data.get("valid_provinces", [])], resize_keyboard=True)
+        await update.message.reply_text("حبيبي اختار من الخيارات يلي تحت 👇", reply_markup=reply_markup)
+        return ASK_PROVINCE
 
     try:
         async with get_db_connection() as conn:
@@ -973,22 +994,20 @@ async def handle_province(update: Update, context: CallbackContext) -> int:
                     return ASK_PROVINCE
 
                 province_id = result[0]
-                # تخزين معرف المحافظة بدلاً من الاسم
                 context.user_data['province_id'] = province_id
-                context.user_data['province_name'] = province  # نحتفظ بالاسم للعرض فقط
+                context.user_data['province_name'] = province
 
-                # جلب المدن المرتبطة بالمحافظة
+                # جلب المدن المرتبطة
                 await cursor.execute("SELECT id, name FROM cities WHERE province_id = %s", (province_id,))
                 rows = await cursor.fetchall()
 
-        cities = [(row[0], row[1]) for row in rows]  # تخزين المعرف والاسم
+        cities = [(row[0], row[1]) for row in rows]
         city_names = [row[1] for row in rows]
         city_names += ["وين مدينتي ؟ 😟", "عودة ➡️"]
 
-        # تخزين قاموس للربط بين أسماء المدن ومعرفاتها
-        context.user_data['city_map'] = {row[1]: row[0] for row in rows}
+        context.user_data['city_map'] = {name: cid for cid, name in cities}
 
-        reply_markup = ReplyKeyboardMarkup([[city] for city in city_names], resize_keyboard=True)
+        reply_markup = ReplyKeyboardMarkup([[c] for c in city_names], resize_keyboard=True)
         await update.message.reply_text("بأي مدينة ؟ 😁", reply_markup=reply_markup)
         return ASK_CITY
 
@@ -1003,9 +1022,11 @@ async def handle_province(update: Update, context: CallbackContext) -> int:
 
 
 
-async def handle_city(update: Update, context: CallbackContext) -> int:
-    city_name = update.message.text
 
+async def handle_city(update: Update, context: CallbackContext) -> int:
+    city_name = update.message.text.strip()
+
+    # 🔙 عودة ← نرجع إلى اختيار المحافظة
     if city_name == "عودة ➡️":
         context.user_data.pop('province_id', None)
         context.user_data.pop('province_name', None)
@@ -1017,67 +1038,50 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
                     rows = await cursor.fetchall()
 
             provinces = [row[0] for row in rows]
-
-            reply_markup = ReplyKeyboardMarkup(
-                [[p for p in provinces[i:i+3]] for i in range(0, len(provinces), 3)],
-                resize_keyboard=True
-            )
+            reply_markup = ReplyKeyboardMarkup([[p] for p in provinces], resize_keyboard=True)
             await update.message.reply_text("بأي محافظة ؟ 😁", reply_markup=reply_markup)
             return ASK_PROVINCE
+
         except Exception as e:
             logger.error(f"Database error in handle_city (عودة): {e}")
             await update.message.reply_text("❌ حدث خطأ أثناء تحميل المحافظات. حاول لاحقًا.")
             return ASK_PROVINCE
 
+    # 🟢 المدينة المخصصة يدويًا
     if city_name == "وين مدينتي ؟ 😟":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
-        await update.message.reply_text(
-            "بدي عذبك تكتبلي اسم مدينتك 😘",
-            reply_markup=reply_markup
-        )
-        # ⏱️ انتظر ثانية واحدة
+        await update.message.reply_text("بدي عذبك تكتبلي اسم مدينتك 😘", reply_markup=reply_markup)
         await asyncio.sleep(2)
-
-        # 📨 الرسالة التي تريد إرسالها بعد التأخير
-        await update.message.reply_text("رح نشوف اسم مدينتك ونجي لندك باقرب وقت 🫡")
-
+        await update.message.reply_text("رح نشوف اسم مدينتك ونجي لعندك بأقرب وقت 🫡")
         return ASK_CUSTOM_CITY
 
-    # الحصول على معرف المدينة من القاموس المخزن
-    city_id = context.user_data.get('city_map', {}).get(city_name)
-    if not city_id:
-        await update.message.reply_text("❌ حدث خطأ في تحديد المدينة. يرجى المحاولة مرة أخرى.")
+    # 🛡️ تحقق من الإدخال غير المتوقع
+    if city_name not in context.user_data.get("city_map", {}):
+        reply_markup = ReplyKeyboardMarkup(
+            [[c] for c in context.user_data.get("city_map", {}).keys()],
+            resize_keyboard=True
+        )
+        await update.message.reply_text("حبيبي اختار من الخيارات يلي تحت 👇", reply_markup=reply_markup)
         return ASK_CITY
 
-    # تخزين معرف المدينة واسمها
+    # ✅ تخزين المدينة المختارة ومتابعة
+    city_id = context.user_data["city_map"][city_name]
     context.user_data['city_id'] = city_id
     context.user_data['city_name'] = city_name
 
-    # متابعة الكود كالمعتاد...
     location_button = KeyboardButton("📍 إرسال موقعي", request_location=True)
     reply_markup = ReplyKeyboardMarkup([[location_button], ["عودة ➡️"]], resize_keyboard=True)
 
-    await update.message.reply_text(
-        "اختار ارسال موقعي اذا كنت مفعل خدمة الموقع GPS 📍",
-        reply_markup=reply_markup
-    )
-    # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
+    await update.message.reply_text("اختار ارسال موقعي اذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
     await asyncio.sleep(2)
-
-    # 📨 الرسالة الثانية بعد ثانية
-    await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
-
+    await update.message.reply_text("اذا ماكنت مفعل، رح تضطر تدور عموقع وتضغط مطول وترسلو 👇")
     await asyncio.sleep(2)
-
-    # 📨 الرسالة الثانية بعد ثانية
-    await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
-
+    await update.message.reply_text("شغل GPS وأرسل الموقع 📍")
     await asyncio.sleep(2)
-
-    # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("ما بدا شي 😄")
-    
+
     return ASK_LOCATION_IMAGE
+
 
 
 async def handle_custom_city(update: Update, context: CallbackContext) -> int:
@@ -1169,8 +1173,6 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
 
 
 
-
-
 async def ask_location(update: Update, context: CallbackContext) -> int:
     """
     طلب الموقع الجغرافي من المستخدم باستخدام ميزة إرسال الموقع في Telegram.
@@ -1185,17 +1187,17 @@ async def ask_location(update: Update, context: CallbackContext) -> int:
         reply_markup=reply_markup
     )
     # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("ما بدا شي 😄")
@@ -1206,64 +1208,25 @@ async def ask_location(update: Update, context: CallbackContext) -> int:
 
 
 
-# الدالة التي تتعامل مع إرسال الموقع من الزبون
 async def handle_location(update: Update, context: CallbackContext) -> int:
     if update.message.location:
         latitude = update.message.location.latitude
         longitude = update.message.location.longitude
 
-        # حفظ الموقع الأساسي في بيانات المستخدم
+        # حفظ الموقع الأساسي
         context.user_data['location_coords'] = {'latitude': latitude, 'longitude': longitude}
 
-        # طلب الموقع الكتابي
-        reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
-        await update.message.reply_text(
-            "تمام",
-            reply_markup=reply_markup
-        )
-        return ASK_LOCATION_TEXT
+        return await ask_area_name(update, context)
+
     else:
-        await update.message.reply_text("❌ يرجى إرسال موقعك باستخدام ميزة Telegram.")
-        return ASK_LOCATION_IMAGE
-
-
-
-
-
-
-async def handle_location_text(update: Update, context: CallbackContext) -> int:
-    user_location_text = update.message.text
-
-    # ⬅️ تحقق مما إذا كانت الرسالة "عودة"
-    if user_location_text == "عودة ➡️":
-        # احذف الإحداثيات المسجلة
-        context.user_data.pop("location_coords", None)
-
-        # ارجع إلى خيار إرسال الموقع من جديد
+        # إذا لم تكن الرسالة موقعًا، نعيد طرح نفس السؤال مع رسالة توجيهية
         location_button = KeyboardButton("📍 إرسال موقعي", request_location=True)
         reply_markup = ReplyKeyboardMarkup([[location_button], ["عودة ➡️"]], resize_keyboard=True)
         await update.message.reply_text(
-            "🔙 تم الرجوع خطوة للخلف. أرسل موقعك باستخدام الزر أدناه.",
+            "❌ هذا مش موقع حقيقي.\nحبيبي اختار من الخيارات يلي تحت 👇",
             reply_markup=reply_markup
         )
         return ASK_LOCATION_IMAGE
-
-    # 🟢 متابعة حفظ الموقع الكتابي
-    context.user_data['location_text'] = user_location_text
-
-    await update.message.reply_text(f"تم استلام موقعك الكتابي: {user_location_text}")
-
-    reply_markup = ReplyKeyboardMarkup([
-        ["اطلب عالسريع 🔥"],
-        ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-        ["من نحن 🏢", "أسئلة متكررة ❓"]
-    ], resize_keyboard=True)
-    await update.message.reply_text(
-        "الآن يمكنك متابعة طلبك أو تعديل معلوماتك.",
-        reply_markup=reply_markup
-    )
-
-    return MAIN_MENU
 
 
 
@@ -1274,7 +1237,7 @@ async def handle_location_text(update: Update, context: CallbackContext) -> int:
 
 async def ask_area_name(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text(
-        "📍 ما اسم المنطقة أو الشارع الذي تسكن فيه ضمن مدينتك؟\n"
+        "📍 شو اسم المنطقة أو الشارع الذي تسكن فيه ضمن مدينتك؟\n"
         "مثلاً: الزراعة، شارع القلعة، أو قرب مدرسة كذا..."
     )
     await asyncio.sleep(2)
@@ -1502,10 +1465,23 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
 
-    if choice == "لا بدي عدل 😐":
+    if choice == "تعديل معلوماتي 🖊":
+        about_msg_id = context.user_data.pop("about_us_msg_id", None)
+        if about_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+            except:
+                pass
+
         return await ask_edit_choice(update, context)
 
     elif choice == "التواصل مع الدعم 🎧":
+        about_msg_id = context.user_data.pop("about_us_msg_id", None)
+        if about_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+            except:
+                pass
         # حذف الرسالة السابقة إن وُجدت
         support_msg_id = context.user_data.get("support_msg_id")
         if support_msg_id:
@@ -1516,7 +1492,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
         # إنشاء زر التواصل عبر التلغرام
         support_button = InlineKeyboardMarkup([[
-            InlineKeyboardButton("راسلنا على التلغرام 💬", url="https://t.me/الدعم" )
+            InlineKeyboardButton("راسلنا على التلغرام 💬", url="https://t.me/Fast54522" )
         ]])
 
         # إرسال رسالة الدعم
@@ -1534,20 +1510,51 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         return MAIN_MENU
 
     elif choice == "من نحن 🏢":
-        await update.message.reply_text(
+        buttons = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📘 فيسبوك", url="https://facebook.com/yourpage"),
+            InlineKeyboardButton("📸 انستغرام", url="https://instagram.com/youraccount")
+        ], [
+            InlineKeyboardButton("📢 قناتنا على تلغرام", url="https://t.me/yourchannel")
+        ]])
+
+        # حذف أي رسالة سابقة "من نحن"
+        about_msg_id = context.user_data.pop("about_us_msg_id", None)
+        if about_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+            except:
+                pass
+
+        # إرسال الرسالة الجديدة
+        sent = await update.message.reply_text(
             "✅ بوتنا مرخص قانونياً لدى الدولة ويهدف إلى تحسين تجربة الطلبات.\n"
             "👨‍💻 لدينا فريق عمل جاهز للاستماع لنصائحكم دائماً لنتطور ونحسن لكم الخدمة.\n"
-            "📲 مواقع التواصل الاجتماعي:\n"
-            "- 📞 واتساب: 0912345678\n"
-            "- 📧 بريد إلكتروني: support@bot.com\n"
-            "- 🌐 موقعنا الإلكتروني: www.bot.com"
+            "📲 تواصل معنا عبر المنصات التالية 👇",
+            reply_markup=buttons
         )
+        context.user_data["about_us_msg_id"] = sent.message_id
         return MAIN_MENU
+
+
 
     elif choice == "أسئلة متكررة ❓":
         return await handle_faq_entry(update, context)
+    about_msg_id = context.user_data.pop("about_us_msg_id", None)
+        if about_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+            except:
+                pass
+
 
     elif choice == "اطلب عالسريع 🔥":
+        about_msg_id = context.user_data.pop("about_us_msg_id", None)
+        if about_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+            except:
+                pass
+
         now = datetime.now()
         cancel_times = context.user_data.get("cancel_history", [])
         cooldown, reason_msg = get_fast_order_cooldown(cancel_times)
@@ -1622,7 +1629,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                     restaurants.append(display_name)
                     restaurant_map[display_name] = {"id": restaurant_id, "name": name}
 
-                restaurants += ["لم يذكر مطعمي؟ 😕", "القائمة الرئيسية 🪧"]
+                restaurants += ["مطعمي المفضل وينو ؟ 😕 😕", "القائمة الرئيسية 🪧"]
                 context.user_data['restaurant_map'] = restaurant_map
 
                 # ✅ توزيع الأزرار على صفوف من عمودين
@@ -1645,31 +1652,6 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
 
 
-
-
-
-
-
-
-async def about_us(update: Update, context: CallbackContext) -> int:
-    """عرض رسالة من نحن."""
-    reply_markup = ReplyKeyboardMarkup([
-        ["اطلب عالسريع 🔥"],
-        ["لا بدي عدل 😐"],
-        ["التواصل مع الدعم 🎧"],
-        ["من نحن 🛡️"],
-        ["أسئلة متكررة ❓"]
-    ], resize_keyboard=True)
-
-    await update.message.reply_text(
-        "بوتنا مرخص قانونياً لدى الدولة، ولدينا فريق جاهز للاستماع لنصائحكم لتحسين الخدمة.\n"
-        "📞 أرقام التواصل:\n"
-        " - 0912345678\n"
-        " - 0998765432\n"
-        "📧 البريد الإلكتروني: support@example.com",
-        reply_markup=reply_markup
-    )
-    return MAIN_MENU
 
 
 async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
@@ -1762,10 +1744,10 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
     restaurant_map = context.user_data.get('restaurant_map', {})
 
     # ✅ لم يذكر مطعمي
-    if selected_option == "لم يذكر مطعمي؟ 😕":
+    if selected_option == "مطعمي المفضل وينو ؟ 😕":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
         await update.message.reply_text(
-            "📋 ما اسم المطعم الذي ترغب بإضافته؟\n📝 سنقوم بالتواصل مع المطعم لإضافته قريباً! 😄",
+            "شو اسم مطعم رح نحكيه عالسريع ! 🔥",
             reply_markup=reply_markup
         )
         return ASK_NEW_RESTAURANT_NAME
@@ -1777,7 +1759,7 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
             ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
             ["من نحن 🏢", "أسئلة متكررة ❓"]
         ], resize_keyboard=True)
-        await update.message.reply_text("تم العودة إلى القائمة الرئيسية.", reply_markup=reply_markup)
+        await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
         return MAIN_MENU
 
     # ✅ التحقق من المطعم المختار
@@ -2031,7 +2013,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                     restaurants.append(display_name)
                     restaurant_map[display_name] = name
 
-                restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
+                restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕 😕"]
                 context.user_data["restaurant_map"] = restaurant_map
 
                 reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
@@ -2094,7 +2076,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 restaurants.append(display_name)
                 restaurant_map[display_name] = name
 
-            restaurants += ["القائمة الرئيسية 🪧", "لم يذكر مطعمي؟ 😕"]
+            restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕 😕"]
             context.user_data["restaurant_map"] = restaurant_map
 
             reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
@@ -2122,7 +2104,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
             ["من نحن 🏢", "أسئلة متكررة ❓"]
         ], resize_keyboard=True)
-        await update.message.reply_text("تم العودة إلى القائمة الرئيسية.", reply_markup=reply_markup)
+        await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
         return MAIN_MENU
 
     selected_restaurant_id = context.user_data.get('selected_restaurant_id')
@@ -2233,7 +2215,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
         reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
         await update.message.reply_text(
-            "🔽 يمكنك اختيار فئة أخرى أو الضغط على 'تم ✅' عند الانتهاء:",
+            "اذا حاطط ببالك مشروب كمان او أي شي فيك تختار من القائمة اسفل الشاشة 👇 وبس تخلص تم 👌",
             reply_markup=reply_markup
         )
         return ORDER_MEAL
@@ -2594,8 +2576,8 @@ async def handle_order_notes(update: Update, context: CallbackContext) -> int:
         context.user_data['order_notes'] = notes or "لا توجد ملاحظات."
 
     reply_markup = ReplyKeyboardMarkup([
-        ["لا لم يتغير أنا في موقعي الأساسي 😄"],
-        ["نعم انا في موقع آخر 🙄"]
+        ["نفس الموقع يلي عطيتكن ياه بالاول 🌝"],
+        ["لاا أنا بمكان تاني 🌚"]
     ], resize_keyboard=True)
 
     await update.message.reply_text(
@@ -2604,8 +2586,6 @@ async def handle_order_notes(update: Update, context: CallbackContext) -> int:
         reply_markup=reply_markup
     )
     return ASK_ORDER_LOCATION
-
-
 
 
 
@@ -2620,7 +2600,7 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         orders = await fixed_orders_from_legacy_dict(orders)
         context.user_data["orders"] = orders
 
-    if choice == "لا لم يتغير أنا في موقعي الأساسي 😄":
+    if choice == "نفس الموقع يلي عطيتكن ياه بالاول 🌝":
         if not orders or not selected_restaurant:
             await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب.")
             return MAIN_MENU
@@ -2633,6 +2613,13 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
             for item in orders
         ]
         summary_text = "\n".join(summary_lines)
+
+        location_text = context.user_data.get("location_text")
+        if location_text and " - " in location_text:
+            area, details = location_text.split(" - ", 1)
+            summary_text += f"\n\n🚚 رح نبعتلك طلبيتك عالسريع على:\n📍 {area}\n{details}"
+        elif location_text:
+            summary_text += f"\n\n🚚 رح نبعتلك طلبيتك عالسريع على:\n📍 {location_text}"
 
         reply_markup = ReplyKeyboardMarkup([
             ["يالله عالسريع 🔥"],
@@ -2647,7 +2634,7 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         )
         return CONFIRM_FINAL_ORDER
 
-    elif choice == "نعم انا في موقع آخر 🙄":
+    elif choice == "لاا أنا بمكان تاني 🌚":
         # 🧭 بدء مسار تحديد الموقع الجديد - أولاً اسم المنطقة
         await update.message.reply_text(
             "🗺️ ما اسم المنطقة أو الشارع الذي تسكن فيه؟ (مثلاً: الزراعة - شارع القلعة)",
@@ -2714,10 +2701,25 @@ async def ask_new_location(update: Update, context: CallbackContext) -> int:
     reply_markup = ReplyKeyboardMarkup([[location_button], ["عودة ⬅️"]], resize_keyboard=True)
 
     await update.message.reply_text(
-        "🔍 يرجى إرسال موقعك الجغرافي باستخدام الزر أدناه لتحديد مكان التوصيل.\n\n"
-        "📌 تأكد من تفعيل خدمة GPS على جهازك لتحديد الموقع بدقة.",
+        "وينك هلا يا حلو 🙉",
         reply_markup=reply_markup
     )
+# ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
+    await asyncio.sleep(3)
+
+    # 📨 الرسالة الثانية بعد ثانية
+    await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
+
+    await asyncio.sleep(3)
+
+    # 📨 الرسالة الثانية بعد ثانية
+    await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
+
+    await asyncio.sleep(3)
+
+    # 📨 الرسالة الثانية بعد ثانية
+    await update.message.reply_text("ما بدا شي 😄")
+
     return ASK_NEW_LOCATION_IMAGE
 
 
@@ -2739,11 +2741,10 @@ async def handle_new_location(update: Update, context: CallbackContext) -> int:
 
         reply_markup = ReplyKeyboardMarkup([["عودة ⬅️"]], resize_keyboard=True)
         await update.message.reply_text(
-            "✅ تم استلام موقعك الجديد.\n\n"
-            "✏️ يرجى كتابة وصف لموقعك الجديد (مثل اسم الحي، الشارع، أو معلم قريب):",
+            "تمام 🐸",
             reply_markup=reply_markup
         )
-        return ASK_NEW_LOCATION_TEXT
+        return await ask_new_area_name(update, context)
 
     await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام الزر لإرسال موقعك.")
     return ASK_NEW_LOCATION_IMAGE
@@ -2775,8 +2776,6 @@ async def ask_new_detailed_location(update: Update, context: CallbackContext) ->
 
     # 🧾 تابع إلى عرض ملخص الطلب
     return await show_order_summary(update, context, is_new_location=True)
-
-
 
 
 
@@ -2822,7 +2821,7 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
     if is_new_location:
         area = context.user_data.get("temporary_area_name", "غير محدد")
         details = context.user_data.get("temporary_detailed_location", "غير محدد")
-        location_text = f"{area}\n{details}"
+        location_text = f"🚚 رح نبعتلك طلبيتك عالسريع على:\n📍 {area}\n{details}"
     else:
         location_text = "📍 الموقع الأساسي المسجل سابقاً"
 
@@ -2833,13 +2832,15 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
 
     await update.message.reply_text(
         f"📋 *ملخص الطلب:*\n{summary_text}\n\n"
-        f"📍 *الموقع:* \n{location_text}\n"
+        f"{location_text}\n"
         f"💰 *المجموع:* {total_price} ل.س\n\n"
         "شو حابب نعمل؟",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
     return CONFIRM_FINAL_ORDER
+
+
 
 async def handle_confirm_final_order(update: Update, context: CallbackContext) -> int:
     return await process_confirm_final_order(update, context)
@@ -2960,7 +2961,7 @@ async def process_confirm_final_order(update, context):
 
             reply_markup = ReplyKeyboardMarkup([
                 ["إلغاء ❌ أريد تعديل الطلب"],
-                ["لم تصل رسالة أنو بلشو بطلبي! 🤔"]
+                ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
             ], resize_keyboard=True)
 
             await update.message.reply_text(
@@ -2980,7 +2981,7 @@ async def process_confirm_final_order(update, context):
 
     elif choice == "لا ماني متأكد 😐":
         await update.message.reply_text(
-            "👌 يمكنك العودة وتعديل طلبك كما تريد.",
+            "ولا يهمك بس تأكد تاني مرة ☺️",
             reply_markup=ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
                 ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
@@ -3034,10 +3035,12 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
             if "تم رفض الطلب" in text:
                 message_text = (
                     "❌ *نعتذر، لم يتم قبول طلبك.*\n\n"
-                    "📍 السبب: قد تكون معلوماتك غير مكتملة أو منطقتك خارج نطاق التوصيل.\n"
-                    "يمكنك تعديل معلوماتك أو المحاولة من مطعم آخر.\n\n"
+                    "السبب: ممكن معلوماتك ما مكتملة أو منطقتك بعيدة عن المطعم كتير.\n"
+                    "فيك تعدل معلوماتك أو حاول من مطعم تاني.\n\n"
+                    "🔥 إذا حسيت في شي غلط، اختار *التواصل مع الدعم 🎧* من القائمة وبيعالجولك وضعك عالسريع.\n\n"
                     "📌 *معرف الطلب:* `" + order_id + "`"
                 )
+
 
                 # ✅ إظهار القائمة الرئيسية
                 reply_markup = ReplyKeyboardMarkup([
@@ -3055,10 +3058,12 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
 
             elif "تم قبول الطلب" in text or "جاري تحضير الطلب" in text:
                 message_text = (
-                    "✅ *تم قبول طلبك وجاري تحضيره!*\n\n"
-                    "🕒 سيتم إعلامك عند جهوزية الطلب للتوصيل.\n\n"
+                    "بسلم عليك المطعم 😄\n"
+                    "وبقلك بلشنا بطلبك عالسريع 🔥\n\n"
+                    "رح نبعتلك مين بدو يوصلك ياه لعندك 🚴‍♂️ بس يجهز 🔥\n\n"
                     "📌 *معرف الطلب:* `" + order_id + "`"
                 )
+
 
                 await context.bot.send_message(
                     chat_id=user_id,
@@ -3079,30 +3084,6 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                     parse_mode="Markdown"
                 )
 
-            elif "تم تسليم الطلب" in text:
-                message_text = (
-                    "🎉 *تم تسليم طلبك بنجاح!*\n\n"
-                    "نتمنى أن تستمتع بوجبتك. شكراً لاختيارك خدمتنا.\n\n"
-                    "📌 *معرف الطلب:* `" + order_id + "`\n\n"
-                    "🌟 هل ترغب بتقييم تجربتك؟"
-                )
-
-                # ✅ إنشاء أزرار التقييم
-                rating_buttons = []
-                for i in range(1, 6):
-                    stars = "⭐" * i
-                    rating_buttons.append(
-                        InlineKeyboardButton(stars, callback_data=f"rate:{order_id}:{i}")
-                    )
-
-                reply_markup = InlineKeyboardMarkup([rating_buttons])
-
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode="Markdown",
-                    reply_markup=reply_markup
-                )
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء معالجة تفاعل الكاشير: {e}")
@@ -3124,7 +3105,7 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
     for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
         context.user_data.pop(key, None)
 
-    # 💬 رسالة الشكر
+    # 💬 رسالة الشكر                                                   
     await update.message.reply_text(
         "🙏 شكراً لك! سعيدون بخدمتك ❤️\n"
         "نتمنى أن تكون استمتعت بطلبك 🍽️ ونتطلع لخدمتك مجددًا!"
@@ -3206,7 +3187,7 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
     elif choice == "العودة والانتظار رسالة بدأ التحضير 😃":
         reply_markup = ReplyKeyboardMarkup([
             ["إلغاء ❌ أريد تعديل الطلب"],
-            ["لم تصل رسالة أنو بلشو بطلبي! 🤔"]
+            ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
             "👌 تم الرجوع إلى الخيارات السابقة. اختر ما تريد:",
@@ -3307,7 +3288,7 @@ async def handle_no_confirmation(update: Update, context: CallbackContext) -> in
     if time_elapsed < 5:
         reply_markup = ReplyKeyboardMarkup([
             ["إلغاء ❌ أريد تعديل الطلب"],
-            ["لم تصل رسالة أنو بلشو بطلبي! 🤔"]
+            ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
             "نعتذر منك عليك الانتظار 5 دقائق 🙏🏻\n"
@@ -3424,7 +3405,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     elif choice == "العودة وانتظار رسالة بدأ التحضير 😃":
         reply_markup = ReplyKeyboardMarkup([
             ["إلغاء ❌ أريد تعديل الطلب"],
-            ["لم تصل رسالة أنو بلشو بطلبي! 🤔"]
+            ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
         await update.message.reply_text(
             "👌 تم الرجوع إلى الخيارات السابقة. اختر ما تريد:",
@@ -4598,7 +4579,7 @@ async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 
-ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, ASK_LOCATION_TEXT, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_RATING, ASK_RATING_COMMENT, ASK_REPORT_REASON, ASK_AREA_NAME, ASK_DETAILED_LOCATION, EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION    = range(31)
+ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_RATING, ASK_RATING_COMMENT, ASK_REPORT_REASON, ASK_AREA_NAME, ASK_DETAILED_LOCATION, EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION    = range(30)
 
 
 
@@ -4610,6 +4591,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
             MessageHandler(filters.Regex("^من نحن 🏢$"), about_us),
             MessageHandler(filters.Regex("^أسئلة متكررة ❓$"), handle_faq_entry),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_info_selection),
             MessageHandler(filters.Regex("^خلينا نبلش 😁$"), ask_name)
         ],
         ASK_NAME: [
@@ -4642,26 +4624,33 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("اي ولو 😏"), handle_confirmation),
             MessageHandler(filters.Regex("لا بدي عدل 😐"), start)
         ],
-        EDIT_FIELD_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_field_choice)],
         ASK_RATING: [
             MessageHandler(filters.Regex(r"⭐.*"), handle_rating),
             MessageHandler(filters.Regex("تخطي ⏭️"), handle_rating)
         ],
         MAIN_MENU: [
             MessageHandler(filters.Regex("اطلب عالسريع 🔥"), main_menu),
-            MessageHandler(filters.Regex("لا بدي عدل 😐"), main_menu),
+            MessageHandler(filters.Regex("^لا بدي عدل 😐$"), ask_edit_choice),
+            MessageHandler(filters.Regex("^تعديل معلوماتي 🖊$"), ask_edit_choice),
             MessageHandler(filters.Regex("من نحن 🏢"), about_us),
             MessageHandler(filters.Regex("أسئلة متكررة ❓"), handle_faq_entry),
             MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), main_menu),
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
-            MessageHandler(filters.Regex("لم تصل رسالة أنو بلشو بطلبي! 🤔"), handle_no_confirmation),
+            MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("إلغاء الطلب لقد تأخروا بالرد ❌"), handle_order_cancellation_open),
             MessageHandler(filters.Regex("تذكير المطعم 🫡"), handle_reminder),
             MessageHandler(filters.Regex("تذكير المطعم بطلبي 👋"), handle_reminder_order_request),
             MessageHandler(filters.Regex("كم يتبقى لطلبي"), ask_remaining_time),
             MessageHandler(filters.Regex("إلغاء ❌ أريد تعديل الطلب"), handle_order_cancellation)
         ],
+        EDIT_FIELD_CHOICE: [
+    MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
+    MessageHandler(filters.Regex("^📱 رقم الهاتف$"), handle_edit_field_choice),
+    MessageHandler(filters.Regex("^📍 الموقع$"), handle_edit_field_choice),
+    MessageHandler(filters.Regex("^عودة ⬅️$"), handle_edit_field_choice),
+    MessageHandler(filters.TEXT, handle_edit_field_choice)
+],
         SELECT_RESTAURANT: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_restaurant_selection)
         ],
@@ -4684,8 +4673,8 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu)
         ],
         ASK_ORDER_LOCATION: [
-            MessageHandler(filters.Regex("نعم انا في موقع آخر 🙄"), ask_new_location),
-            MessageHandler(filters.Regex("لا لم يتغير أنا في موقعي الأساسي 😄"), ask_order_location)
+            MessageHandler(filters.Regex("لاا أنا بمكان تاني 🌚"), ask_new_location),
+            MessageHandler(filters.Regex("نفس الموقع يلي عطيتكن ياه بالاول 🌝"), ask_order_location)
         ],
         ASK_NEW_LOCATION_IMAGE: [
             MessageHandler(filters.LOCATION, handle_new_location),
@@ -4712,7 +4701,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("تأكيد الإلغاء ❌"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("مننطر اسا شوي 🤷"), handle_order_cancellation_open),
             MessageHandler(filters.Regex("إلغاء ❌ أريد تعديل الطلب"), handle_order_cancellation),
-            MessageHandler(filters.Regex("لم تصل رسالة أنو بلشو بطلبي! 🤔"), handle_no_confirmation),
+            MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("العودة والانتظار رسالة بدأ التحضير 😃"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
