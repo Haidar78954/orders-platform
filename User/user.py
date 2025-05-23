@@ -4406,11 +4406,23 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     message = update.message
 
-    # ✅ إعادة تهيئة الجلسة يدويًا للمبرمج
+     # ✅ بداية جديدة حتى لو كان المستخدم مسجل مسبقًا
     if message and message.text and message.text.strip() in ["/start", "/start force404"]:
         print(f"🔁 تم طلب إعادة تشغيل من المستخدم {user_id}")
+
+        # حذف بيانات الجلسة من قاعدة البيانات (conversation_states)
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
+                await conn.commit()
+        except Exception as e:
+            logger.error(f"❌ فشل حذف conversation_state للمستخدم {user_id}: {e}")
+
+        # مسح بيانات context المؤقتة
         context.user_data.clear()
         context.chat_data.clear()
+
         await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇")
         return await start(update, context)
 
