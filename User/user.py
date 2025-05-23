@@ -744,15 +744,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
 
     await message.reply_text(
-        "أهلاً وسهلاً 🌹\n"
-        "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-        "غايتنا تطلب بكبسة زر 👌",
-        reply_markup = ReplyKeyboardMarkup([
-            ["ليش هالأسئلة ؟ 🧐 "],
-            ["خلينا نبلش 😁"]
-        ], 
-         resize_keyboard=True)
-    )
+    "أهلاً وسهلاً 🌹\n"
+    "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
+    "غايتنا تطلب بكبسة زر 👌",
+    reply_markup=ReplyKeyboardMarkup([
+        ["ليش هالأسئلة ؟ 🧐"],
+        ["خلينا نبلش 😁"]
+    ], resize_keyboard=True)
+)
     return ASK_INFO
 
 
@@ -4304,7 +4303,7 @@ async def handle_vip_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     if not row:
-        await update.message.reply_text("👋 لازم تسجل معلوماتك أولاً من خيار 'املأ بياناتي'.")
+        await update.message.reply_text("👋 لازم تسجل معلوماتك أولاً من خيار 'خلينا نبلش 😁'.")
         return ConversationHandler.END
 
     if row[0] != city_id:
@@ -4583,7 +4582,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐 $"), ask_info_details),
             MessageHandler(filters.Regex("^من نحن 🏢$"), about_us),
             MessageHandler(filters.Regex("^أسئلة متكررة ❓$"), handle_faq_entry),
-            MessageHandler(filters.Regex("^املأ بياناتي$"), ask_name)
+            MessageHandler(filters.Regex("^خلينا نبلش 😁$"), ask_name)
         ],
         ASK_NAME: [
             MessageHandler(filters.Regex("^عودة ⬅️$"), handle_back_to_info),
