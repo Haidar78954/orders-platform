@@ -4406,25 +4406,26 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     message = update.message
 
-     # ✅ بداية جديدة حتى لو كان المستخدم مسجل مسبقًا
-    if message and message.text and message.text.strip() in ["/start", "/start force404"]:
-        print(f"🔁 تم طلب إعادة تشغيل من المستخدم {user_id}")
+    print(f"🔁 /start من المستخدم {user_id} - إعادة تشغيل إجبارية")
 
-        # حذف بيانات الجلسة من قاعدة البيانات (conversation_states)
-        try:
-            async with get_db_connection() as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
-                await conn.commit()
-        except Exception as e:
-            logger.error(f"❌ فشل حذف conversation_state للمستخدم {user_id}: {e}")
+    # مسح بيانات الجلسة
+    context.user_data.clear()
+    context.chat_data.clear()
 
-        # مسح بيانات context المؤقتة
-        context.user_data.clear()
-        context.chat_data.clear()
+    # (اختياري) حذف من conversation_states
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
+            await conn.commit()
+    except Exception as e:
+        logging.error(f"❌ فشل حذف session من DB: {e}", exc_info=True)
 
-        await message.reply_text("🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇")
-        return await start(update, context)
+    await message.reply_text(
+        "🔄 تمت إعادة تعيين الجلسة.\nنبدأ من جديد الآن 👇"
+    )
+    return await start(update, context)
+
 
     # ✅ معالجة بارامترات الإعلانات
     if message and message.text and message.text.startswith("/start "):
@@ -4597,8 +4598,8 @@ ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, A
 
 
 conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", handle_ad_start),
-    MessageHandler(filters.Regex("^/start force404$"), handle_ad_start)],
+    #entry_points=[CommandHandler("start", handle_ad_start),
+    #MessageHandler(filters.Regex("^/start force404$"), handle_ad_start)],
     states={
         ASK_INFO: [
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
@@ -4735,7 +4736,9 @@ def run_user_bot () :
     application = Application.builder().token("8035364090:AAFlQC5slPnNBMnFUxyyZzxS5ltWkWZZ6CM").build()
 
     
+
     
+
     # المعالجات
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("start", handle_ad_start))
