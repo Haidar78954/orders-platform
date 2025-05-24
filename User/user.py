@@ -54,6 +54,84 @@ logger = logging.getLogger(__name__)
 user_orders = {}
 
 
+# محدد معدل الطلبات
+class RateLimiter:
+    def __init__(self, max_calls, period):
+        self.max_calls = max_calls
+        self.period = period
+        self.calls = deque()
+
+    async def acquire(self):
+        now = time.time()
+
+        # إزالة الطلبات القديمة
+        while self.calls and self.calls[0] < now - self.period:
+            self.calls.popleft()
+
+        # إذا وصلنا للحد الأقصى، انتظر
+        if len(self.calls) >= self.max_calls:
+            wait_time = self.calls[0] + self.period - now
+            await asyncio.sleep(wait_time)
+
+        # تسجيل الطلب الجديد
+        self.calls.append(time.time())
+
+# إنشاء محدد معدل للطلبات
+telegram_limiter = RateLimiter(max_calls=30, period=1)  # 30 طلب في الثانية
+
+# دالة لإرسال رسالة مع إعادة المحاولة
+async def send_message_with_retry(bot, chat_id, text, order_id=None, max_retries=5, **kwargs):
+    message_id = str(uuid.uuid4())  # إنشاء معرف فريد للرسالة
+    
+    # محاولة إرسال الرسالة مع إعادة المحاولة
+    for attempt in range(max_retries):
+        try:
+            # تطبيق محدد معدل الطلبات
+            await telegram_limiter.acquire()
+            
+            # إرسال الرسالة
+            sent_message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+            
+            # إرجاع الرسالة المرسلة
+            return sent_message
+            
+        except Exception as e:
+            logger.error(f"فشل في إرسال الرسالة (المحاولة {attempt+1}/{max_retries}): {e}")
+            
+            # انتظار قبل إعادة المحاولة (زيادة وقت الانتظار مع كل محاولة)
+            wait_time = 0.5 * (2 ** attempt)  # 0.5, 1, 2, 4, 8 ثواني
+            await asyncio.sleep(wait_time)
+    
+    # رفع استثناء بعد فشل جميع المحاولات
+    raise Exception(f"فشلت جميع المحاولات ({max_retries}) لإرسال الرسالة.")
+
+
+
+# دالة لتحديث حالة الطلب في قاعدة البيانات المشتركة
+async def update_order_status(order_id, status, bot_type):
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # تحديث الحالة وتوقيت آخر مزامنة حسب نوع البوت
+            if bot_type == "user":
+                await cursor.execute(
+                    "INSERT INTO order_status (order_id, status, last_sync_user_bot) "
+                    "VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE status = %s, last_sync_user_bot = %s",
+                    (order_id, status, current_time, status, current_time)
+                )
+            else:  # restaurant
+                await cursor.execute(
+                    "INSERT INTO order_status (order_id, status, last_sync_restaurant_bot) "
+                    "VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE status = %s, last_sync_restaurant_bot = %s",
+                    (order_id, status, current_time, status, current_time)
+                )
+            
+        await conn.commit()
+
+
 
 
 
@@ -392,7 +470,7 @@ telegram_limiter = RateLimiter(max_calls=30, period=1)  # 30 طلب في الث�
 # استخدام المحدد قبل كل طلب لـ API تلغرام
 async def send_message_with_rate_limit(chat_id, text, **kwargs):
     await telegram_limiter.acquire()
-    return await context.bot.send_message(chat_id=chat_id, text=text, **kwargs)
+    return await send_message_with_retry(context.bot, chat_id, text=text, **kwargs)
 
 async def save_cart_to_db(user_id, cart_data):
     """حفظ سلة التسوق في قاعدة البيانات"""
@@ -731,6 +809,58 @@ def get_main_menu():
         ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
         ["من نحن 🏢", "أسئلة متكررة ❓"]
     ], resize_keyboard=True)
+
+#_____________________________
+
+# دوال إنشاء الرسائل الموحدة
+def create_new_order_message(order_id, order_number, user_name, phone, address, items, total_price):
+    """إنشاء رسالة طلب جديد بالتنسيق الموحد"""
+    
+    # بناء قائمة الطلبات
+    items_text = ""
+    for i, item in enumerate(items, 1):
+        items_text += f"  {i}. {item['name']} x{item['quantity']} - {item['price']} ريال\n"
+    
+    # بناء الرسالة الكاملة
+    message = (
+        f"🛒 *طلب جديد*\n\n"
+        f"🔢 *رقم الطلب:* `{order_number}`\n"
+        f"🆔 *معرف الطلب:* `{order_id}`\n\n"
+        f"👤 *اسم المستخدم:* {user_name}\n"
+        f"📱 *رقم الهاتف:* {phone}\n"
+        f"📍 *العنوان:* {address}\n\n"
+        f"📋 *الطلبات:*\n{items_text}\n"
+        f"💰 *المجموع:* {total_price} ريال"
+    )
+    
+    return message
+
+def create_rating_message(order_id, order_number, rating, comment=None):
+    """إنشاء رسالة تقييم بالتنسيق الموحد"""
+    
+    stars = "⭐" * rating
+    
+    message = (
+        f"📊 *تقييم جديد*\n\n"
+        f"🔢 *رقم الطلب:* `{order_number}`\n"
+        f"🆔 *معرف الطلب:* `{order_id}`\n\n"
+        f"⭐ *التقييم:* {stars} ({rating}/5)\n"
+    )
+    
+    if comment:
+        message += f"💬 *التعليق:* {comment}"
+    
+    return message
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2918,29 +3048,35 @@ async def process_confirm_final_order(update, context):
 
                 await conn.commit()
 
+            # ✅ تنسيق الطلبات حسب البنود الموحدة
             summary_counter = defaultdict(int)
             for item in orders:
-                label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
-                summary_counter[label] += 1
+                key = (item['name'], item['size'], item['price'])
+                summary_counter[key] += 1
 
-            summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-            summary_text = "\n".join(summary_lines)
-            total_price = sum(item.get('price', 0) for item in orders)
+            items_for_message = []
+            for (name, size, price), quantity in summary_counter.items():
+                label = f"{name} ({size})" if size != "default" else name
+                items_for_message.append({
+                    "name": label,
+                    "quantity": quantity,
+                    "price": price
+                })
 
-            order_text = (
-                f"🛒 *طلب جديد* 🛒\n\n"
-                f"📋 *رقم الطلب:* {order_number}\n"
-                f"📌 *معرف الطلب:* `{order_id}`\n"
-                f"👤 *الزبون:* {name}\n"
-                f"📱 *رقم الهاتف:* {phone}\n\n"
-                f"🍽️ *الطلبات:*\n{summary_text}\n\n"
-                f"💰 *المجموع الكلي:* {total_price} ل.س\n\n"
-                f"📍 *الموقع:* {location_text}\n"
-                f"🗺️ *المطعم:* {selected_restaurant}\n"
-                f"⏱️ *وقت الطلب:* {datetime.now().strftime('%H:%M:%S')}"
+            total_price = sum(item['price'] * item['quantity'] for item in items_for_message)
+
+            # ✅ إنشاء الرسالة بالتنسيق الموحد
+            order_text = create_new_order_message(
+                order_id=order_id,
+                order_number=order_number,
+                user_name=name,
+                phone=phone,
+                address=location_text,
+                items=items_for_message,
+                total_price=total_price
             )
 
-            await context.bot.send_message(chat_id=restaurant_channel, text=order_text, parse_mode="Markdown")
+            await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
 
             if location_coords and 'latitude' in location_coords and 'longitude' in location_coords:
                 await context.bot.send_location(
@@ -2993,6 +3129,7 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
+
 
 
 
@@ -3087,44 +3224,6 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء معالجة تفاعل الكاشير: {e}")
-
-
-
-
-
-
-
-
-async def handle_order_received(update: Update, context: CallbackContext) -> int:
-    """
-    عند اختيار 'وصل طلبي شكراً لكم 🙏' يتم حذف بيانات الطلب مؤقتاً،
-    ثم عرض خيارات التقييم عبر النجوم.
-    """
-
-    # 🧹 حذف بيانات الطلب
-    for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
-        context.user_data.pop(key, None)
-
-    # 💬 رسالة شكر وتقييم
-    await update.message.reply_text(
-        "حلوو 😍\n"
-        "الله جعله صحةة 😘\n\n"
-        "كم نجمة حابب تعطيه للمطعم 🤩\n\n"
-    )
-
-    # 🌟 عرض خيارات التقييم
-    reply_markup = ReplyKeyboardMarkup(
-        [["⭐"], ["⭐⭐"], ["⭐⭐⭐"], ["⭐⭐⭐⭐"], ["⭐⭐⭐⭐⭐"]],
-        resize_keyboard=True
-    )
-
-    await update.message.reply_text(
-        "✨ كيف كانت تجربتك مع هذا المطعم؟ اختر عدد النجوم للتقييم:",
-        reply_markup=reply_markup
-    )
-
-    return ASK_RATING
-
 
 
 
@@ -3531,7 +3630,7 @@ async def process_report_cancellation(update: Update, context: CallbackContext) 
         f"💬 سبب الإلغاء:\n{reason}"
     )
 
-    await context.bot.send_message(chat_id="@reports_cancel", text=report_message)
+    await send_message_with_retry(context.bot, "@reports_cancel", text=report_message)
 
     # 📣 إشعار قناة المطعم
     try:
@@ -3916,203 +4015,178 @@ async def show_relevant_ads(update: Update, context: CallbackContext):
 
 
 
+async def handle_order_received(update: Update, context: CallbackContext) -> int:
+    # 🧹 تنظيف بيانات الطلب
+    for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
+        context.user_data.pop(key, None)
 
+    # حفظ حالة أن هذا التقييم جاء بعد التسليم
+    context.user_data['came_from_delivery'] = True
 
-
-async def ask_rating(update: Update, context: CallbackContext) -> int:
-    selected_restaurant = context.user_data.get('selected_restaurant', 'غير متوفر')
-    order_data = context.user_data.get("order_data", {})
-
-    if not selected_restaurant or "order_number" not in order_data:
-        await update.message.reply_text("❌ حدث خطأ في جلب معلومات الطلب.")
-        return MAIN_MENU
-
-    # حفظ رقم الطلب لربطه بالتقييم لاحقًا
-    context.user_data["delivered_order_number"] = order_data["order_number"]
-
+    # عرض خيارات التقييم مع زر تخطي كامل
     reply_markup = ReplyKeyboardMarkup([
-        ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-        ["تخطي ⏭️"]
-    ], resize_keyboard=True)
+    ["⭐", "⭐⭐", "⭐⭐⭐"],
+    ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+    ["تخطي ⏭️"]
+], resize_keyboard=True)
 
     await update.message.reply_text(
-        f"كيف كانت تجربتك مع *{selected_restaurant}*؟\n"
-        "يرجى اختيار تقييمك:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        "✨ كيف كانت تجربتك مع هذا المطعم؟\n"
+        "يرجى اختيار عدد النجوم للتقييم، أو اختر 'تخطي ⏭️' إذا لا ترغب بالتقييم.",
+        reply_markup=reply_markup
     )
+
     return ASK_RATING
-
-
-
 
 
 async def handle_rating(update: Update, context: CallbackContext) -> int:
     rating_text = update.message.text
 
-    # تحويل النص إلى عدد النجوم
-    rating_map = {
-        "⭐": 1,
-        "⭐⭐": 2,
-        "⭐⭐⭐": 3,
-        "⭐⭐⭐⭐": 4,
-        "⭐⭐⭐⭐⭐": 5
-    }
+    if rating_text == "تخطي ⏭️":
+        # لا شيء يُرسل، فقط العودة إلى القائمة الرئيسية
+        await update.message.reply_text("تمام! 🙌 رجعناك للقائمة الرئيسية.", reply_markup=main_menu_keyboard)
+        return MAIN_MENU
 
+    rating_map = {"⭐": 1, "⭐⭐": 2, "⭐⭐⭐": 3, "⭐⭐⭐⭐": 4, "⭐⭐⭐⭐⭐": 5}
     rating = rating_map.get(rating_text, 0)
+
     if rating == 0:
-        await update.message.reply_text("❌ يرجى اختيار تقييم صالح من القائمة.")
+        await update.message.reply_text("❌ يرجى اختيار تقييم صحيح من القائمة.")
         return ASK_RATING
 
-    # حفظ التقييم مؤقتاً
     context.user_data['temp_rating'] = rating
 
-    # طلب تعليق إضافي
-    reply_markup = ReplyKeyboardMarkup([
-        ["تخطي ➡️"]
-    ], resize_keyboard=True)
-
+    reply_markup = ReplyKeyboardMarkup([["تخطي التعليق"]], resize_keyboard=True)
     await update.message.reply_text(
-        "شكراً على تقييمك! 🙏\n"
-        "هل ترغب بإضافة تعليق أو ملاحظة حول تجربتك؟",
+        "شكراً على تقييمك! 🙏\nهل ترغب بترك تعليق لتحسين الخدمة؟",
         reply_markup=reply_markup
     )
+
     return ASK_RATING_COMMENT
 
 
-async def handle_rating_callback(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    await query.answer()
 
-    try:
-        data = query.data.replace("rate:", "")
-        order_id, rating = data.split(":", 1)
-        rating = int(rating)
-    except Exception as e:
-        logger.error(f"❌ خطأ في تحليل بيانات التقييم: {e}")
-        await query.message.reply_text("❌ حدث خطأ أثناء معالجة التقييم.")
-        return
-
+async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    text = update.message.text
 
-    try:
-        async with aiosqlite.connect("database.db") as db:
-            # جلب معرف المطعم من الطلب
-            async with db.execute("SELECT restaurant_id FROM user_orders WHERE order_id = ?", (order_id,)) as cursor:
-                result = await cursor.fetchone()
+    if text == "تخطي ⏭️":
+        return await show_main_menu(update, context)
 
-            if not result:
-                await query.message.reply_text("❌ لم يتم العثور على الطلب المرتبط بهذا التقييم.")
-                return
+    order_info = await get_last_order(user_id)
+    if not order_info:
+        await update.message.reply_text("ليس لديك طلبات سابقة للتقييم.")
+        return MAIN_MENU
 
-            restaurant_id = result[0]
+    await update_conversation_state(user_id, "rating_order_id", order_info["order_id"])
+    await update_conversation_state(user_id, "rating_order_number", order_info["order_number"])
+    await update_conversation_state(user_id, "rating_restaurant_id", order_info["restaurant_id"])
 
-            # التحقق من وجود تقييم سابق
-            async with db.execute(
-                "SELECT id FROM restaurant_ratings WHERE restaurant_id = ? AND user_id = ?", 
-                (restaurant_id, user_id)
-            ) as cursor:
-                existing_rating = await cursor.fetchone()
+    keyboard  = [
+    ["⭐", "⭐⭐", "⭐⭐⭐"],
+    ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+    ["تخطي ⏭️"]
+]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-            if existing_rating:
-                # تحديث التقييم الموجود
-                await db.execute(
-                    "UPDATE restaurant_ratings SET rating = ?, created_at = CURRENT_TIMESTAMP WHERE restaurant_id = ? AND user_id = ?",
-                    (rating, restaurant_id, user_id)
-                )
-            else:
-                # إضافة تقييم جديد
-                await db.execute(
-                    "INSERT INTO restaurant_ratings (restaurant_id, user_id, rating) VALUES (?, ?, ?)",
-                    (restaurant_id, user_id, rating)
-                )
-
-            await db.commit()
-
-            # جلب اسم المطعم للعرض
-            async with db.execute("SELECT name FROM restaurants WHERE id = ?", (restaurant_id,)) as cursor:
-                restaurant_result = await cursor.fetchone()
-                restaurant_name = restaurant_result[0] if restaurant_result else "المطعم"
-
-        # إرسال رسالة تأكيد
-        stars = "⭐" * rating
-        await query.message.reply_text(
-            f"✅ شكراً لتقييمك! لقد قيّمت {restaurant_name} بـ {stars}\n\n"
-            "هل ترغب بإضافة تعليق على تجربتك؟",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("نعم، أضف تعليق", callback_data=f"add_comment:{order_id}:{restaurant_id}")],
-                [InlineKeyboardButton("لا، شكراً", callback_data="no_comment")]
-            ])
-        )
-
-    except Exception as e:
-        logger.error(f"❌ خطأ في حفظ التقييم: {e}")
-        await query.message.reply_text("❌ حدث خطأ أثناء حفظ التقييم. يرجى المحاولة لاحقاً.")
+    await update.message.reply_text(
+        f"يرجى تقييم طلبك رقم {order_info['order_number']} من مطعم {order_info['restaurant_name']}:",
+        reply_markup=reply_markup
+    )
+    return RATING
 
 
+
+async def receive_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    if text == "🔙 رجوع":
+        return await show_main_menu(update, context)
+
+    rating = len(text)
+    await update_conversation_state(user_id, "rating_stars", rating)
+
+    reply_markup = ReplyKeyboardMarkup([["تخطي التعليق"], ["🔙 رجوع"]], resize_keyboard=True)
+
+    await update.message.reply_text(
+        "شكراً على التقييم! هل ترغب في إضافة تعليق؟ (اكتب تعليقك أو اضغط على 'تخطي التعليق')",
+        reply_markup=reply_markup
+    )
+    return RATING_COMMENT
 
 async def handle_rating_comment(update: Update, context: CallbackContext) -> int:
     comment = update.message.text
+    if comment == "تخطي التعليق":
+        comment = None  # تقييم بدون تعليق
 
-    if comment == "تخطي ➡️":
-        comment = ""
-
-    rating = context.user_data.get('temp_rating', 0)
+    rating = context.user_data.get('temp_rating') or 0
     user_id = update.effective_user.id
-    restaurant_id = context.user_data.get('selected_restaurant_id')
 
-    if not restaurant_id:
-        # محاولة استرجاع معرف المطعم من بيانات الطلب الأخير
-        order_data = context.user_data.get('order_data', {})
-        restaurant_id = order_data.get('restaurant_id')
+    # محاولة استخراج البيانات من user_data أو قاعدة المحادثة
+    order_data = context.user_data.get("order_data", {})
+    restaurant_id = order_data.get("restaurant_id")
+    order_id = order_data.get("order_id")
+    order_number = order_data.get("order_number")
 
-    if not restaurant_id:
-        await update.message.reply_text("❌ لم نتمكن من تحديد المطعم الذي تريد تقييمه.")
+    # إذا لم توجد بيانات، نحاول من قاعدة المحادثة (لـ request_rating)
+    if not all([restaurant_id, order_id, order_number]):
+        try:
+            state = await get_conversation_state(user_id)
+            restaurant_id = restaurant_id or state.get("rating_restaurant_id")
+            order_id = order_id or state.get("rating_order_id")
+            order_number = order_number or state.get("rating_order_number")
+            rating = rating or state.get("rating_stars")
+        except:
+            pass
+
+    if not all([restaurant_id, order_id, order_number, rating]):
+        await update.message.reply_text("❌ لم نتمكن من إرسال التقييم. يرجى المحاولة لاحقاً.")
         return MAIN_MENU
 
+    success = await send_rating_to_restaurant(
+        bot=context.bot,
+        user_id=user_id,
+        order_id=order_id,
+        order_number=order_number,
+        restaurant_id=restaurant_id,
+        rating=rating,
+        comment=comment
+    )
+
+    if success:
+        await update.message.reply_text("✅ تم إرسال تقييمك، شكرًا لملاحظاتك!", reply_markup=main_menu_keyboard)
+    else:
+        await update.message.reply_text("❌ فشل في إرسال التقييم. يرجى المحاولة لاحقاً.", reply_markup=main_menu_keyboard)
+
+    return MAIN_MENU
+
+
+
+
+
+async def send_rating_to_restaurant(bot, user_id, order_id, order_number, restaurant_id, rating, comment=None):
     try:
-        async with aiosqlite.connect("database.db") as db:
-            # التحقق من وجود تقييم سابق لنفس المستخدم ونفس المطعم
-            async with db.execute(
-                "SELECT id FROM restaurant_ratings WHERE user_id = ? AND restaurant_id = ?",
-                (user_id, restaurant_id)
-            ) as cursor:
-                existing_rating = await cursor.fetchone()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT channel FROM restaurants WHERE id = %s", (restaurant_id,))
+                result = await cursor.fetchone()
 
-            if existing_rating:
-                # تحديث التقييم الموجود
-                await db.execute(
-                    "UPDATE restaurant_ratings SET rating = ?, comment = ?, created_at = CURRENT_TIMESTAMP WHERE user_id = ? AND restaurant_id = ?",
-                    (rating, comment, user_id, restaurant_id)
-                )
-            else:
-                # إضافة تقييم جديد
-                await db.execute(
-                    "INSERT INTO restaurant_ratings (restaurant_id, user_id, rating, comment) VALUES (?, ?, ?, ?)",
-                    (restaurant_id, user_id, rating, comment)
-                )
+        if not result:
+            return False
 
-            await db.commit()
+        channel_id = result[0]
+        stars = "⭐" * rating
+        message = f"المستخدم {user_id} استلم طلبه رقم {order_number} وقام بتقييمه بـ {stars}\n🆔 معرف الطلب: {order_id}\n"
+        if comment and comment.strip():
+            message += f"💬 التعليق: {comment}"
 
-            # عرض رسالة شكر
-            reply_markup = ReplyKeyboardMarkup([
-                ["اطلب عالسريع 🔥"],
-                ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-                ["من نحن 🏢", "أسئلة متكررة ❓"]
-            ], resize_keyboard=True)
-
-            await update.message.reply_text(
-                "✅ شكراً جزيلاً على تقييمك! نقدر رأيك ونعمل دائماً على تحسين خدماتنا.",
-                reply_markup=reply_markup
-            )
-
-            return MAIN_MENU
+        await bot.send_message(chat_id=channel_id, text=message, parse_mode="Markdown")
+        return True
 
     except Exception as e:
-        logger.error(f"❌ خطأ أثناء حفظ التقييم: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء حفظ تقييمك. يرجى المحاولة لاحقاً.")
-        return MAIN_MENU
-
+        logger.error(f"خطأ في إرسال التقييم: {e}")
+        return False
 
 
 
@@ -4576,7 +4650,7 @@ async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 
-ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_RATING, ASK_RATING_COMMENT, ASK_REPORT_REASON, ASK_AREA_NAME, ASK_DETAILED_LOCATION, EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION    = range(30)
+ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_REPORT_REASON, ASK_AREA_NAME,  EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION, ASK_RATING_COMMENT, ASK_RATING     = range(27)
 
 
 
@@ -4621,10 +4695,6 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("اي ولو 😏"), handle_confirmation),
             MessageHandler(filters.Regex("لا بدي عدل 😐"), start)
         ],
-        ASK_RATING: [
-            MessageHandler(filters.Regex(r"⭐.*"), handle_rating),
-            MessageHandler(filters.Regex("تخطي ⏭️"), handle_rating)
-        ],
         MAIN_MENU: [
             MessageHandler(filters.Regex("اطلب عالسريع 🔥"), main_menu),
             MessageHandler(filters.Regex("^لا بدي عدل 😐$"), ask_edit_choice),
@@ -4632,7 +4702,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("من نحن 🏢"), about_us),
             MessageHandler(filters.Regex("أسئلة متكررة ❓"), handle_faq_entry),
             MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), main_menu),
-            MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
+            MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), request_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("تأخرو كتير إلغاء عالسريع 😡"), handle_order_cancellation_open),
@@ -4700,7 +4770,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("معلش رجعني 🙃"), handle_confirm_cancellation),
-            MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), ask_rating),
+            MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), request_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cancellation_reason)
         ],
@@ -4710,16 +4780,45 @@ conv_handler = ConversationHandler(
         ASK_REPORT_REASON: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_report_cancellation)
         ],
+        ASK_RATING: [
+            MessageHandler(filters.Regex(r"⭐.*"), handle_rating),
+            MessageHandler(filters.Regex("تخطي ⏭️"), handle_rating)
+        ],
         ASK_RATING_COMMENT: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rating_comment)
         ]
+
     },
      fallbacks=[CommandHandler("cancel", start)]
 )
 
 
 
+ORDER_ID_PATTERNS = [
+    r"معرف الطلب:?\s*[`\"']?([\w\d]+)[`\"']?",
+    r"🆔.*?[`\"']?([\w\d]+)[`\"']?",
+    r"order_id:?\s*[`\"']?([\w\d]+)[`\"']?"
+]
 
+ORDER_NUMBER_PATTERNS = [
+    r"رقم الطلب:?\s*[`\"']?(\d+)[`\"']?",
+    r"🔢.*?[`\"']?(\d+)[`\"']?",
+    r"order_number:?\s*[`\"']?(\d+)[`\"']?"
+]
+
+def extract_order_id(text):
+    for pattern in ORDER_ID_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return None
+
+def extract_order_number(text):
+    for pattern in ORDER_NUMBER_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return int(match.group(1))
+    return None
 
     
 
