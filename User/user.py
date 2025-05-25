@@ -869,17 +869,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     # الرسالة الترحيبية الأولى
     await message.reply_text("لك يا أهلين و سهلين ❤️")
-    await asyncio.sleep(3)
+    await asyncio.sleep(1)
 
     # الرسائل المتتالية بتأخير
     await message.reply_text("حابب تطلب من هلا وطالع عالسريع ؟ 🔥")
-    await asyncio.sleep(3)
+    await asyncio.sleep(1)
 
     await message.reply_text("جاوب عهالأسئلة عالسريع 🔥")
-    await asyncio.sleep(2)
+    await asyncio.sleep(1)
 
     await message.reply_text("بس أول مرة 😘")
-    await asyncio.sleep(2)
+    await asyncio.sleep(1)
 
     # إرسال الستيكر بعد التأخير
     await context.bot.send_sticker(
@@ -1058,7 +1058,6 @@ async def send_verification_code(update: Update, context: CallbackContext) -> in
 
 
 
-
 async def verify_code(update: Update, context: CallbackContext) -> int:
     if update.message.text == "عودة ⬅️":
         context.user_data.pop('phone', None)
@@ -1070,7 +1069,7 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("وهي سجلنا رقمك 🙂")
 
         # ⏱️ انتظر ثانية واحدة
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         # 📨 الرسالة التي تريد إرسالها بعد التأخير
         await update.message.reply_text("مارح نعطيه لحدا 😃")
@@ -1092,6 +1091,9 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
                     rows = await cursor.fetchall()
                     provinces = [row[0] for row in rows]
 
+                    # ✅ تخزين المحافظات للتحقق لاحقًا
+                    context.user_data["valid_provinces"] = provinces.copy()
+
                 await conn.commit()
 
         except Exception as e:
@@ -1100,7 +1102,6 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
             return ASK_PHONE_VERIFICATION
 
         provinces.append("عودة ➡️")
-
         reply_markup = ReplyKeyboardMarkup(
             [[p for p in provinces[i:i+3]] for i in range(0, len(provinces), 3)],
             resize_keyboard=True
@@ -1109,10 +1110,9 @@ async def verify_code(update: Update, context: CallbackContext) -> int:
         return ASK_PROVINCE
 
     else:
-        await update.message.reply_text(
-            "حط نضارات وارجاع تأكد 🤓"
-        )
+        await update.message.reply_text("حط نضارات وارجاع تأكد 🤓")
         return ASK_PHONE_VERIFICATION
+
 
 
 
