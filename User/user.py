@@ -1018,10 +1018,12 @@ async def send_verification_code(update: Update, context: CallbackContext) -> in
         )
 
         # إرسال الكود إلى القناة
-        await context.bot.send_message(
+        await send_message_with_retry(
+            bot=context.bot,
             chat_id="@verifycode12345",
             text=verification_message
         )
+
 
         reply_markup = ReplyKeyboardMarkup([
             ["عودة ⬅️"]
@@ -1626,13 +1628,16 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         ]])
 
         # إرسال رسالة الدعم
-        sent = await update.message.reply_text(
-            "☎️ للتواصل معنا:\n"
-            "- 0999999999\n"
-            "- 0999999998\n\n"
-            "💬 أو تواصل معنا مباشرة عبر تلغرام من الزر أدناه 👇",
+        sent = await send_message_with_retry(
+            bot=context.bot,
+            chat_id=update.effective_chat.id,
+            text="☎️ للتواصل معنا:\n"
+                 "- 0999999999\n"
+                 "- 0999999998\n\n"
+                 "💬 أو تواصل معنا مباشرة عبر تلغرام من الزر أدناه 👇",
             reply_markup=support_button
         )
+
 
         # حفظ رقم الرسالة في context لحذفها لاحقًا
         context.user_data["support_msg_id"] = sent.message_id
@@ -2161,13 +2166,18 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
             province_name = row[1] if row else "غير معروفة"
 
             try:
-                await context.bot.send_message(
+                await send_message_with_retry(
+                    bot=context.bot,
                     chat_id=missing_restaurant_channel,
-                    text=f"📢 زبون جديد اقترح إضافة مطعم:\n\n"
-                         f"🏪 اسم المطعم: {missing_restaurant_name}\n"
-                         f"🌍 المدينة: {city_name}\n"
-                         f"📍 المحافظة: {province_name}\n\n"
-                         f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
+                    text=(
+                        f"📢 زبون جديد اقترح إضافة مطعم:\n\n"
+                        f"🏪 اسم المطعم: {missing_restaurant_name}\n"
+                        f"🌍 المدينة: {city_name}\n"
+                        f"📍 المحافظة: {province_name}\n\n"
+                        f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
+                    )
+                )
+
                 )
                 await update.message.reply_text("✅ تم إرسال اسم المطعم بنجاح. سنقوم بالتواصل معه قريباً! 🙏")
             except Exception as e:
@@ -4650,7 +4660,7 @@ async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 
-ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_REPORT_REASON, ASK_AREA_NAME,  EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION, ASK_RATING_COMMENT, ASK_RATING     = range(27)
+ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_REPORT_REASON, ASK_AREA_NAME,  EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION, ASK_RATING_COMMENT, ASK_RATING, RATING_COMMENT     = range(30)
 
 
 
