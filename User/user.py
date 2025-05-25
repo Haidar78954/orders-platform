@@ -1863,34 +1863,6 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
 
 
-
-
-async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
-    # حذف الرسائل السابقة إن وجدت
-    old_faq_msg_id = context.user_data.get("faq_msg_id")
-    if old_faq_msg_id:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_faq_msg_id)
-        except:
-            pass
-
-    faq_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("❓ لماذا يتم رفض طلبي", callback_data="faq_refusal")],
-        [InlineKeyboardButton("⏱️ ما هو الوقت المتوقع لوصول الطلب", callback_data="faq_eta")],
-        [InlineKeyboardButton("🛑 ماذا أفعل إذا واجهت مشكلة في تسجيل الطلب", callback_data="faq_issue")],
-        [InlineKeyboardButton("🚫 لماذا حسابي محظور؟", callback_data="faq_ban")],
-        [InlineKeyboardButton("📦❌ ماذا لو طلبت ولم أستلم الطلب؟", callback_data="faq_no_delivery")],
-        [InlineKeyboardButton("🔁 ماذا لو طلبت وألغيت كثيرًا؟", callback_data="faq_repeat_cancel")]
-    ])
-
-    sent = await update.message.reply_text(
-        "شو في بالك من هالأسئلة؟ 👇",
-        reply_markup=faq_keyboard
-    )
-    context.user_data["faq_msg_id"] = sent.message_id
-    return MAIN_MENU
-
-
 async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
     # حذف ستيكر الدعم إن وُجد
     support_sticker_id = context.user_data.pop("support_sticker_id", None)
@@ -1924,6 +1896,40 @@ async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
     )
     context.user_data["faq_msg_id"] = sent.message_id
     return MAIN_MENU
+
+
+async def handle_faq_response(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    old_faq_msg_id = context.user_data.get("faq_msg_id")
+    if old_faq_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=query.message.chat.id, message_id=old_faq_msg_id)
+        except:
+            pass
+
+    faq_answers = {
+        "faq_refusal": "🚫 يتم رفض الطلب غالبًا بسبب نقص في البيانات أو التوصيل خارج النطاق أو تقييمات سابقة سلبية.",
+        "faq_eta": "⏱️ عادةً يتم التوصيل خلال 30 إلى 60 دقيقة حسب الضغط ومسافة المطعم.",
+        "faq_issue": "🛑 إذا واجهت مشكلة أثناء الطلب، أعد المحاولة أو تواصل مع الدعم عبر @Support.",
+        "faq_ban": "🚫 قد يتم حظر الحساب في حال تكرار الإلغاء أو عدم التواجد لاستلام الطلب.",
+        "faq_no_delivery": "📦 إذا لم تستلم الطلب، راجع إشعارات القناة أو تواصل مع المطعم مباشرة.",
+        "faq_repeat_cancel": "🔁 الإلغاء المتكرر يسبب مشاكل في النظام، وقد يؤدي إلى حظر مؤقت."
+    }
+
+    selected = query.data
+    answer = faq_answers.get(selected, "❓ لم يتم العثور على إجابة لهذا السؤال.")
+
+    back_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 عودة للأسئلة المتكررة", callback_data="faq_back")]
+    ])
+
+    sent = await query.message.reply_text(
+        answer,
+        reply_markup=back_keyboard
+    )
+    context.user_data["faq_answer_msg_id"] = sent.message_id
 
 
 
