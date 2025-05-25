@@ -5008,8 +5008,8 @@ def run_user_bot () :
     application.add_handler(CallbackQueryHandler(handle_faq_back, pattern="^faq_back$"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
 
-    app.add_handler(CallbackQueryHandler(explain_location_instruction, pattern="^how_to_send_location$"))
-    app.add_handler(CallbackQueryHandler(handle_order_flow_help, pattern="^help_with_order_flow$"))
+    application.add_handler(CallbackQueryHandler(explain_location_instruction, pattern="^how_to_send_location$"))
+    application.add_handler(CallbackQueryHandler(handle_order_flow_help, pattern="^help_with_order_flow$"))
 
 
     
