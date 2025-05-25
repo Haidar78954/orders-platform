@@ -4805,7 +4805,6 @@ conv_handler = ConversationHandler(
     states={
         ASK_INFO: [
             MessageHandler(filters.Regex("^ليش هالأسئلة ؟ 🧐$"), ask_info_details),
-            MessageHandler(filters.Regex("^من نحن 🏢$"), about_us),
             MessageHandler(filters.Regex("^أسئلة متكررة ❓$"), handle_faq_entry),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_info_selection),
             MessageHandler(filters.Regex("^خلينا نبلش 😁$"), ask_name)
