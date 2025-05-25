@@ -1437,7 +1437,7 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
 
-     await asyncio.sleep(2)
+    await asyncio.sleep(2)
 
     # إرسال الستيكر بعد التأخير
     await context.bot.send_sticker(
