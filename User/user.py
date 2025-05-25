@@ -1447,7 +1447,7 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     await asyncio.sleep(2)
     
         # 📨 الرسالة الثانية بعد ثانية
-        await update.message.reply_text("خلصت هي اخر سؤال 😁")
+    await update.message.reply_text("خلصت هي اخر سؤال 😁")
 
     
     return ASK_DETAILED_LOCATION
