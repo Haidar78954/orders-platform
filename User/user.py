@@ -22,7 +22,6 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    ChannelPostHandler,
     ConversationHandler,
     ContextTypes,
     CallbackContext,
@@ -4973,7 +4972,7 @@ def run_user_bot () :
 
     
     application.add_handler(CommandHandler("testimage", test_copy_image))
-    application.add_handler(ChannelPostHandler(handle_remaining_time_for_order))  # 🟢 هذا يجب أن يكون أولاً
+    application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_remaining_time_for_order))
 
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"تم تسليم الطلب.*معرف الطلب"),
