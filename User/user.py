@@ -2286,8 +2286,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                         f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
                     )
                 )
-
-                )
                 await update.message.reply_text("✅ تم إرسال اسم المطعم بنجاح. سنقوم بالتواصل معه قريباً! 🙏")
             except Exception as e:
                 logger.error(f"❌ خطأ أثناء إرسال اسم المطعم إلى القناة: {e}")
