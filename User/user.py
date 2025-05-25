@@ -1656,33 +1656,79 @@ async def handle_edit_field_choice(update: Update, context: CallbackContext) -> 
 
 
 
-# ✅ دالة مساعدة لتقسيم العناصر إلى أعمدة
-def chunk_buttons(items, cols=2):
-    return [items[i:i + cols] for i in range(0, len(items), cols)]
 
-# ✅ دالة القائمة الرئيسية المعدلة
+
+
+async def maybe_send_package(update: Update, context: CallbackContext):
+    try:
+        last_time = context.user_data.get("last_order_time")
+        if not last_time:
+            return
+
+        if isinstance(last_time, str):
+            last_time = datetime.fromisoformat(last_time)
+
+        if (datetime.now() - last_time) >= timedelta(days=5):
+            package = random.choice(PACKAGES)
+            await update.message.reply_text(package["text"])
+            await context.bot.send_sticker(chat_id=update.effective_chat.id, sticker=package["sticker"])
+
+            # تحديث الوقت حتى لا يظهر مرة أخرى مباشرة
+            context.user_data["last_order_time"] = datetime.now()
+    except Exception as e:
+        print(f"خطأ في maybe_send_package: {e}")
+
+PACKAGES = [
+    {
+        "text": "شو ؟ ",
+        "sticker": "CAACAgIAAxkBAAEBxxtoM28OJ54uTXFiDx0pyaTKmcg4mwACNAEAAlKJkSMTzddv9RwHWDYE"
+    },
+    {
+        "text": "اشتقتلك والله",
+        "sticker": "CAACAgIAAxkBAAEBxxxoM28On-kDepA-XluW3lEuGyQllAACWBEAAr4RKEkctAGRFeQMEDYE"
+    },
+    {
+        "text": "بحبك وبعرف مشي الي !",
+        "sticker": "CAACAgIAAxkBAAEBxx1oM28OYWmOIZbfZN1W6cGCzvRpowACMT0AApxnUUhqOdZ3B7NPkzYE"
+    },
+    {
+        "text": "عم تخوني ؟",
+        "sticker": "CAACAgIAAxkBAAEBxyRoM2--odXSfkEWulipUHmbFDCXJgACEjgAAl_lqEikri3n1nbbXTYE"
+    }
+]
+
+
+
+
+
+
 async def main_menu(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
 
-    if choice == "تعديل معلوماتي 🖊":
-        about_msg_id = context.user_data.pop("about_us_msg_id", None)
-        if about_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-            except:
-                pass
+    # ✅ إرسال بكج إذا مر وقت طويل بدون طلب
+    await maybe_send_package(update, context)
 
+    # ✅ حذف ستيكر الدعم إن وجد
+    support_sticker_id = context.user_data.pop("support_sticker_id", None)
+    if support_sticker_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=support_sticker_id)
+        except:
+            pass
+
+    # ✅ حذف رسالة "من نحن" إن وجدت
+    about_msg_id = context.user_data.pop("about_us_msg_id", None)
+    if about_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
+        except:
+            pass
+
+    if choice == "تعديل معلوماتي 🖊":
         return await ask_edit_choice(update, context)
 
     elif choice == "التواصل مع الدعم 🎧":
-        about_msg_id = context.user_data.pop("about_us_msg_id", None)
-        if about_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-            except:
-                pass
-        # حذف الرسالة السابقة إن وُجدت
         support_msg_id = context.user_data.get("support_msg_id")
         if support_msg_id:
             try:
@@ -1690,12 +1736,10 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             except:
                 pass
 
-        # إنشاء زر التواصل عبر التلغرام
         support_button = InlineKeyboardMarkup([[
-            InlineKeyboardButton("راسلنا على التلغرام 💬", url="https://t.me/Fast54522" )
+            InlineKeyboardButton("راسلنا على التلغرام 💬", url="https://t.me/Fast54522")
         ]])
 
-        # إرسال رسالة الدعم
         sent = await send_message_with_retry(
             bot=context.bot,
             chat_id=update.effective_chat.id,
@@ -1706,29 +1750,22 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             reply_markup=support_button
         )
 
-
-        # حفظ رقم الرسالة في context لحذفها لاحقًا
+        sticker_msg = await context.bot.send_sticker(
+            chat_id=update.effective_chat.id,
+            sticker="CAACAgIAAxkBAAEBxvxoM2NN7whnEdE4ppLdFIao_3FjewACvAwAAocoMEntN5GZWCFoBDYE"
+        )
+        context.user_data["support_sticker_id"] = sticker_msg.message_id
         context.user_data["support_msg_id"] = sent.message_id
 
         return MAIN_MENU
 
     elif choice == "من نحن 🏢":
-        buttons = InlineKeyboardMarkup([[
-            InlineKeyboardButton("📘 فيسبوك", url="https://facebook.com/yourpage"),
-            InlineKeyboardButton("📸 انستغرام", url="https://instagram.com/youraccount")
-        ], [
-            InlineKeyboardButton("📢 قناتنا على تلغرام", url="https://t.me/yourchannel")
-        ]])
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📘 فيسبوك", url="https://facebook.com/yourpage"),
+             InlineKeyboardButton("📸 انستغرام", url="https://instagram.com/youraccount")],
+            [InlineKeyboardButton("📢 قناتنا على تلغرام", url="https://t.me/yourchannel")]
+        ])
 
-        # حذف أي رسالة سابقة "من نحن"
-        about_msg_id = context.user_data.pop("about_us_msg_id", None)
-        if about_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-            except:
-                pass
-
-        # إرسال الرسالة الجديدة
         sent = await update.message.reply_text(
             "✅ بوتنا مرخص قانونياً لدى الدولة ويهدف إلى تحسين تجربة الطلبات.\n"
             "👨‍💻 لدينا فريق عمل جاهز للاستماع لنصائحكم دائماً لنتطور ونحسن لكم الخدمة.\n"
@@ -1738,43 +1775,26 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         context.user_data["about_us_msg_id"] = sent.message_id
         return MAIN_MENU
 
-
-
     elif choice == "أسئلة متكررة ❓":
         return await handle_faq_entry(update, context)
-    about_msg_id = context.user_data.pop("about_us_msg_id", None)
-        if about_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-            except:
-                pass
-
 
     elif choice == "اطلب عالسريع 🔥":
-        about_msg_id = context.user_data.pop("about_us_msg_id", None)
-        if about_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-            except:
-                pass
-
         now = datetime.now()
+        context.user_data["last_fast_order_time"] = now
+        context.user_data["last_order_time"] = now  # ✅ لتتبع آخر نشاط
+
         cancel_times = context.user_data.get("cancel_history", [])
         cooldown, reason_msg = get_fast_order_cooldown(cancel_times)
-
         last_try = context.user_data.get("last_fast_order_time")
+
         if last_try and (now - last_try).total_seconds() < cooldown:
             remaining = int(cooldown - (now - last_try).total_seconds())
             minutes = max(1, remaining // 60)
             await update.message.reply_text(
                 f"{reason_msg}\n⏳ الرجاء الانتظار {minutes} دقيقة قبل إعادة المحاولة.",
-                reply_markup=ReplyKeyboardMarkup([
-                    ["القائمة الرئيسية 🪧"]
-                ], resize_keyboard=True)
+                reply_markup=ReplyKeyboardMarkup([["القائمة الرئيسية 🪧"]], resize_keyboard=True)
             )
             return MAIN_MENU
-
-        context.user_data["last_fast_order_time"] = now
 
         for key in ['temporary_location_text', 'temporary_location_coords', 'temporary_total_price',
                     'orders', 'order_confirmed', 'selected_restaurant']:
@@ -1792,10 +1812,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
                     await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
                     if await cursor.fetchone():
-                        await update.message.reply_text(
-                            "❌ رقمك محظور مؤقتاً من استخدام الخدمة.\n"
-                            "للاستفسار: @Support"
-                        )
+                        await update.message.reply_text("❌ رقمك محظور مؤقتاً من استخدام الخدمة.\nللاستفسار: @Support")
                         return MAIN_MENU
 
                     await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
@@ -1810,7 +1827,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
                 restaurants = []
                 restaurant_map = {}
-                highlight_name = context.user_data.get("go_ad_restaurant_name")  # ⭐️ المطعم القادم من إعلان
+                highlight_name = context.user_data.get("go_ad_restaurant_name")
 
                 for restaurant_id, name, is_frozen in rows:
                     if is_frozen:
@@ -1818,7 +1835,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
 
                     async with conn.cursor() as cursor:
                         await cursor.execute(
-                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s", 
+                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
                             (restaurant_id,)
                         )
                         rating_data = await cursor.fetchone()
@@ -1835,7 +1852,6 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                 restaurants += ["مطعمي المفضل وينو ؟ 😕 😕", "القائمة الرئيسية 🪧"]
                 context.user_data['restaurant_map'] = restaurant_map
 
-                # ✅ توزيع الأزرار على صفوف من عمودين
                 keyboard_buttons = [KeyboardButton(name) for name in restaurants]
                 keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
                 reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
@@ -1851,7 +1867,6 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return MAIN_MENU
-
 
 
 
@@ -1883,41 +1898,39 @@ async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
     return MAIN_MENU
 
 
-
-async def handle_faq_response(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    # حذف رسالة الأسئلة
-    old_faq_msg_id = context.user_data.get("faq_msg_id")
-    if old_faq_msg_id:
+async def handle_faq_entry(update: Update, context: CallbackContext) -> int:
+    # حذف ستيكر الدعم إن وُجد
+    support_sticker_id = context.user_data.pop("support_sticker_id", None)
+    if support_sticker_id:
         try:
-            await context.bot.delete_message(chat_id=query.message.chat.id, message_id=old_faq_msg_id)
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=support_sticker_id)
         except:
             pass
 
-    faq_answers = {
-        "faq_refusal": "🚫 يتم رفض الطلب غالبًا بسبب نقص في البيانات أو التوصيل خارج النطاق أو تقييمات سابقة سلبية.",
-        "faq_eta": "⏱️ عادةً يتم التوصيل خلال 30 إلى 60 دقيقة حسب الضغط ومسافة المطعم.",
-        "faq_issue": "🛑 إذا واجهت مشكلة أثناء الطلب، أعد المحاولة أو تواصل مع الدعم عبر @Support.",
-        "faq_ban": "🚫 قد يتم حظر الحساب في حال تكرار الإلغاء أو عدم التواجد لاستلام الطلب.",
-        "faq_no_delivery": "📦 إذا لم تستلم الطلب، راجع إشعارات القناة أو تواصل مع المطعم مباشرة.",
-        "faq_repeat_cancel": "🔁 الإلغاء المتكرر يسبب مشاكل في النظام، وقد يؤدي إلى حظر مؤقت."
-    }
+    # حذف رسالة الأسئلة السابقة إن وُجدت
+    old_faq_msg_id = context.user_data.get("faq_msg_id")
+    if old_faq_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_faq_msg_id)
+        except:
+            pass
 
-    selected = query.data
-    answer = faq_answers.get(selected, "❓ لم يتم العثور على إجابة لهذا السؤال.")
-
-    back_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔙 عودة للأسئلة المتكررة", callback_data="faq_back")]
+    # أزرار الأسئلة الشائعة
+    faq_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❓ لماذا يتم رفض طلبي", callback_data="faq_refusal")],
+        [InlineKeyboardButton("⏱️ ما هو الوقت المتوقع لوصول الطلب", callback_data="faq_eta")],
+        [InlineKeyboardButton("🛑 ماذا أفعل إذا واجهت مشكلة في تسجيل الطلب", callback_data="faq_issue")],
+        [InlineKeyboardButton("🚫 لماذا حسابي محظور؟", callback_data="faq_ban")],
+        [InlineKeyboardButton("📦❌ ماذا لو طلبت ولم أستلم الطلب؟", callback_data="faq_no_delivery")],
+        [InlineKeyboardButton("🔁 ماذا لو طلبت وألغيت كثيرًا؟", callback_data="faq_repeat_cancel")]
     ])
 
-    sent = await query.message.reply_text(
-        answer,
-        reply_markup=back_keyboard
+    sent = await update.message.reply_text(
+        "شو في بالك من هالأسئلة؟ 👇",
+        reply_markup=faq_keyboard
     )
-    context.user_data["faq_answer_msg_id"] = sent.message_id
-
+    context.user_data["faq_msg_id"] = sent.message_id
+    return MAIN_MENU
 
 
 
@@ -2762,6 +2775,11 @@ async def handle_done_adding_meals(update: Update, context: CallbackContext) -> 
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxv9oM2VLrcxfq5FSQvvYLQ_TfEs1qQACxREAArCasUhdUZ2-kKVX2jYE"
+    )
+
     return ASK_ORDER_NOTES
 
 
@@ -3054,10 +3072,15 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
         f"📋 *ملخص الطلب:*\n{summary_text}\n\n"
         f"{location_text}\n"
         f"💰 *المجموع:* {total_price} ل.س\n\n"
-        "شو حابب نعمل؟",
+        "صرنا جاهزين  منطلب ؟",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxwJoM2X4YRXyTB7SEfeJfmTibkBxsAAC4TMAAleOAAFIyLOz0lxKOb02BA"
+    )
+
     return CONFIRM_FINAL_ORDER
 
 
@@ -3195,9 +3218,14 @@ async def process_confirm_final_order(update, context):
                 f"📋 رقم الطلب: {order_number}\n"
                 f"🍽️ المطعم: {selected_restaurant}\n"
                 f"💰 المجموع: {total_price} ل.س\n\n"
-                f"⏳ سيتم إعلامك عندما يبدأ المطعم بتحضير طلبك.",
+                f"رح يبعتلك الكاشير بس يبلشو 😉",
                 reply_markup=reply_markup
             )
+            await context.bot.send_sticker(
+                chat_id=update.effective_chat.id,
+                sticker="CAACAgIAAxkBAAEBxnFoMQZFcg7tO0yexYxhUK4JLJAc0gACZDQAAqVkGUp0aoPgoYfAATYE"
+            )
+
             return MAIN_MENU
 
         except Exception as e:
@@ -3267,6 +3295,10 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 "🔥 إذا حسيت في شي غلط، اختار *التواصل مع الدعم 🎧* من القائمة وبيعالجولك وضعك عالسريع.\n\n"
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
+            await context.bot.send_sticker(
+                chat_id=update.effective_chat.id,
+                sticker="CAACAgIAAxkBAAEBxxFoM2f1BDjNy-9ivZQXi9S_YqTLaAACSDsAAhNy-UgXWLa5FO4pTzYE"
+            )
 
             reply_markup = ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
@@ -3288,6 +3320,11 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 "رح نبعتلك مين بدو يوصلك ياه لعندك 🚴‍♂️ بس يجهز 🔥\n\n"
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
+            await context.bot.send_sticker(
+                chat_id=update.effective_chat.id,
+                sticker="CAACAgIAAxkBAAEBxwtoM2b-lusvTTS2gHaC6p567Ri8QAAC6TkAAquXoElIPA20liWcHzYE"
+            )
+
 
             await context.bot.send_message(
                 chat_id=user_id,
@@ -3301,6 +3338,11 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 "🕒 سيصلك قريباً، يرجى التأكد من تواجدك في العنوان المحدد.\n\n"
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
+            await context.bot.send_sticker(
+                chat_id=update.effective_chat.id,
+                sticker="CAACAgIAAxkBAAEBxw5oM2c2g216QRpeJjVncTYMihrQswACdhEAAsMAASlJLbkjGWa6Dog2BA"
+            )
+
 
             await context.bot.send_message(
                 chat_id=user_id,
@@ -3331,10 +3373,13 @@ async def handle_order_cancellation(update: Update, context: CallbackContext) ->
         "متاكد ؟ 🫤",
         reply_markup=reply_markup
     )
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxxRoM2gxP-n-YZEzCpwaLn85iOY6FAAChS4AAgnbcEtYq7na6YNylzYE"
+    )
+
 
     return CANCEL_ORDER_OPTIONS
-
-
 
 
 
@@ -3361,6 +3406,18 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
         ]
         context.user_data["cancel_history"].append(now)
 
+        # حذف بيانات الطلب
+        for key in ['orders', 'selected_restaurant', 'order_data']:
+            context.user_data.pop(key, None)
+
+        reply_markup = ReplyKeyboardMarkup([
+            ["اطلب عالسريع 🔥"],
+            ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+            ["من نحن 🏢", "أسئلة متكررة ❓"]
+        ], resize_keyboard=True)
+        await update.message.reply_text("تم إلغاء طلبك ، بتمنى منك تنتبه اكتر تاني مرة قبل التأكيد ☺️", reply_markup=reply_markup)
+        return MAIN_MENU
+
     elif choice == "معلش رجعني 🙃":
         reply_markup = ReplyKeyboardMarkup([
             ["إلغاء ❌ بدي عدل"],
@@ -3375,7 +3432,6 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CANCEL_ORDER_OPTIONS
-
 
 
 
@@ -3472,6 +3528,7 @@ async def handle_no_confirmation(update: Update, context: CallbackContext) -> in
             "ممكن في زحمة طلبات قبلك 🫨",
             reply_markup=reply_markup
         )
+        
         return MAIN_MENU
 
     # إذا مر أكثر من 5 دقائق
@@ -3484,7 +3541,10 @@ async def handle_no_confirmation(update: Update, context: CallbackContext) -> in
         "بتحب فيك تنكشو للكاشير أو فيك تشوف مطعم غيره 😊",
         reply_markup=reply_markup
     )
-
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxxhoM2v_6q5ji4WFJqVQn9zuBPsMnwACmkYAAuLPsUgK6Mn07keZgjYE"
+    )
     return CANCEL_ORDER_OPTIONS
 
 
