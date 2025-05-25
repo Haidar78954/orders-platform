@@ -328,10 +328,11 @@ DB_PATH = "database.db"
 # إنشاء تجمع اتصالات
 # استبدال تجمع اتصالات SQLite بتجمع اتصالات MySQL
 class DBConnectionPool:
-    def __init__(self, max_connections=10):
+    def __init__(self, max_connections=20):  # ← هنا زدت العدد من 10 إلى 20
         self.max_connections = max_connections
         self.connections = []
         self.semaphore = asyncio.Semaphore(max_connections)
+
 
     async def get_connection(self):
         await self.semaphore.acquire()
