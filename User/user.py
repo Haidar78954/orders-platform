@@ -864,7 +864,6 @@ def create_rating_message(order_id, order_number, rating, comment=None):
 
 
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message
     user_id = update.effective_user.id
@@ -872,17 +871,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # التحقق من اتساق البيانات عند بدء المحادثة
     await verify_data_consistency(user_id)
 
+    # تنظيف أي بيانات سابقة
     context.user_data.clear()
 
-    await message.reply_text(
-    "أهلاً وسهلاً 🌹\n"
-    "بدنا نسألك كم سؤال لتسجيل معلوماتك لأول مرة 😄\n"
-    "غايتنا تطلب بكبسة زر 👌",
-    reply_markup=ReplyKeyboardMarkup([
+    # الرسالة الترحيبية الأولى
+    await message.reply_text("لك يا أهلين و سهلين ❤️")
+    await asyncio.sleep(3)
+
+    # الرسائل المتتالية بتأخير
+    await message.reply_text("حابب تطلب من هلا وطالع عالسريع ؟ 🔥")
+    await asyncio.sleep(3)
+
+    await message.reply_text("جاوب عهالأسئلة عالسريع 🔥")
+    await asyncio.sleep(2)
+
+    await message.reply_text("بس أول مرة 😘")
+    await asyncio.sleep(2)
+
+    # إرسال الستيكر بعد التأخير
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxpNoMeK-Uvn1iWDhyR3mFDJJI_Mj7gACQhAAAjPFKUmQDtQRpypKgjYE"
+    )
+
+    # عرض الخيارات
+    reply_markup = ReplyKeyboardMarkup([
         ["ليش هالأسئلة ؟ 🧐"],
         ["خلينا نبلش 😁"]
     ], resize_keyboard=True)
-)
+
+    await message.reply_text(
+        "نبلش؟ 😄",
+        reply_markup=reply_markup
+    )
+
     return ASK_INFO
 
 
@@ -1304,38 +1326,56 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
 
 
 
-
-
 async def ask_location(update: Update, context: CallbackContext) -> int:
-    """
-    طلب الموقع الجغرافي من المستخدم باستخدام ميزة إرسال الموقع في Telegram.
-    """
     reply_markup = ReplyKeyboardMarkup([
         ["إرسال موقعي 📍"],
         ["عودة ➡️"]
     ], resize_keyboard=True)
 
+    inline_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+    ])
+
     await update.message.reply_text(
-        "اختار ارسال موقعي اذا كنت مفعل خدمة الموقع GPS 📍",
+        "اختار إرسال موقعي إذا كنت مفعل خدمة الموقع GPS 📍",
         reply_markup=reply_markup
     )
-    # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
-    await asyncio.sleep(3)
 
-    # 📨 الرسالة الثانية بعد ثانية
-    await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
-
-    await asyncio.sleep(3)
-
-    # 📨 الرسالة الثانية بعد ثانية
-    await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
+    await update.message.reply_text(
+        "👇 إذا مو واضح فيك تشوف شرح سريع:",
+        reply_markup=inline_markup
+    )
 
     await asyncio.sleep(3)
+    await update.message.reply_text("إذا ما كنت مفعل، دور على الموقع واضغط عليه مطولًا، ثم اختر إرسال 👇")
 
-    # 📨 الرسالة الثانية بعد ثانية
+    await asyncio.sleep(3)
+    await update.message.reply_text("اسمع مني 🔊 شغّل GPS وبس اضغط إرسال موقعي 📍")
+
+    await asyncio.sleep(3)
     await update.message.reply_text("ما بدا شي 😄")
-    
+
     return ASK_LOCATION_IMAGE
+
+
+async def explain_location_instruction(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        # إعدادات القناة وصورة التعليم
+        MEDIA_CHANNEL_ID = -1001234567890  # ⬅️ غيّر هذا إلى ID القناة السري
+        IMAGE_MESSAGE_ID = 42              # ⬅️ غيّر هذا إلى message_id للصورة داخل القناة
+
+        await context.bot.copy_message(
+            chat_id=query.from_user.id,
+            from_chat_id=MEDIA_CHANNEL_ID,
+            message_id=IMAGE_MESSAGE_ID
+        )
+
+    except Exception as e:
+        logger.error(f"❌ فشل في إرسال صورة التعليم: {e}")
+        await context.bot.send_message(chat_id=query.from_user.id, text="❌ لم نتمكن من عرض الشرح الآن.")
 
 
 
@@ -1397,8 +1437,21 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
 
+     await asyncio.sleep(2)
+
+    # إرسال الستيكر بعد التأخير
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxudoMx_S9YodkQJ2aFqbWagsExrgXgAC_g0AAoGJqEhLiXZ1bM9WgDYE"
+    )
+    await asyncio.sleep(2)
+    
+        # 📨 الرسالة الثانية بعد ثانية
+        await update.message.reply_text("خلصت هي اخر سؤال 😁")
+
     
     return ASK_DETAILED_LOCATION
+
 
 async def handle_area_name(update: Update, context: CallbackContext) -> int:
     area_name = update.message.text.strip()
@@ -1419,7 +1472,10 @@ async def confirm_info(update: Update, context: CallbackContext) -> int:
         reply_markup = ReplyKeyboardMarkup([
             ["عودة ➡️"]
         ], resize_keyboard=True)
-        await update.message.reply_text("🔙 تم الرجوع إلى السؤال السابق. يرجى كتابة اسم منطقتك من جديد:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "🔙 تم الرجوع إلى السؤال السابق. يرجى كتابة اسم منطقتك من جديد:",
+            reply_markup=reply_markup
+        )
         return ASK_AREA_NAME
 
     # حفظ الوصف التفصيلي
@@ -1440,13 +1496,23 @@ async def confirm_info(update: Update, context: CallbackContext) -> int:
         f"🔹 المحافظة: {province}\n"
         f"🔹 المدينة: {city}\n"
         f"🔹 اسم المنطقة أو الشارع: {area_name}\n"
-        f"🔹 وصف تفصيلي للموقع: {detailed_location}\n"
+        f"🔹 وصف تفصيلي للموقع: {detailed_location}"
     )
 
     reply_markup = ReplyKeyboardMarkup([
         ["اي ولو 😏"],
         ["لا بدي عدل 😐"]
     ], resize_keyboard=True)
+
+    # إرسال الرسائل بتسلسل
+    await asyncio.sleep(2)
+    await update.message.reply_text("أخيراا 🔥")
+
+    await asyncio.sleep(2)
+    await context.bot.send_sticker(
+        chat_id=update.effective_chat.id,
+        sticker="CAACAgIAAxkBAAEBxupoMyA2CN7ETdFf8JloOif7qOc1XQACXhIAAuyZKUl879mlR_dkOzYE"
+    )
 
     if location_coords:
         latitude = location_coords.get('latitude')
@@ -1513,6 +1579,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
                 "هلا صار فيك تطلب عالسريع 🔥",
                 reply_markup=reply_markup
             )
+    
             await asyncio.sleep(2)
 
             # 📨 الرسالة الثانية بعد ثانية
@@ -2007,8 +2074,6 @@ async def check_restaurant_availability(restaurant_id: int) -> bool:
         return False
 
 
-
-
 async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAULT_TYPE, from_ad=False):
     restaurant_id = context.user_data.get("selected_restaurant_id")
 
@@ -2018,50 +2083,80 @@ async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAU
 
     try:
         async with get_db_connection() as conn:
-            # جلب اسم المطعم
             async with conn.cursor() as cursor:
+                # جلب اسم المطعم
                 await cursor.execute("SELECT name FROM restaurants WHERE id = %s", (restaurant_id,))
                 row = await cursor.fetchone()
 
-            if not row:
-                await update.message.reply_text("❌ لم يتم العثور على المطعم.")
-                return
+                if not row:
+                    await update.message.reply_text("❌ لم يتم العثور على المطعم.")
+                    return
 
-            restaurant_name = row[0]
-            context.user_data["selected_restaurant_name"] = restaurant_name
-            context.user_data["current_cart_restaurant"] = restaurant_name
+                restaurant_name = row[0]
+                context.user_data["selected_restaurant_name"] = restaurant_name
+                context.user_data["current_cart_restaurant"] = restaurant_name
 
-            # جلب الفئات المرتبطة بالمطعم
-            async with conn.cursor() as cursor:
-                await cursor.execute("""
-                    SELECT name FROM categories
-                    WHERE restaurant_id = %s
-                    ORDER BY name
-                """, (restaurant_id,))
+                # جلب الفئات: id + name
+                await cursor.execute("SELECT id, name FROM categories WHERE restaurant_id = %s ORDER BY name", (restaurant_id,))
                 rows = await cursor.fetchall()
 
         if not rows:
             await update.message.reply_text("❌ لا توجد فئات مسجلة لهذا المطعم حالياً.")
             return
 
-        keyboard = [[KeyboardButton(name[0])] for name in rows]
+        # إعداد الكيبورد + تخزين map
+        category_map = {}
+        keyboard = []
+        for category_id, name in rows:
+            keyboard.append([KeyboardButton(name)])
+            category_map[name] = category_id
+
+        context.user_data["category_map"] = category_map
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-        if from_ad:
-            await update.message.reply_text(
-                f"✨ عروض من {restaurant_name} وصلت حديثًا!\n"
-                f"👇 اختر الفئة وشوف العروض عالسريع!",
-                reply_markup=reply_markup
-            )
+        open_count = context.user_data.get("category_screen_count", 0)
+        context.user_data["category_screen_count"] = open_count + 1
+
+        if open_count == 0:
+            await update.message.reply_text(f"📋 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
+            await asyncio.sleep(1)
+            await send_order_help_text(update, context)
         else:
+            await update.message.reply_text(f"📋 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
             await update.message.reply_text(
-                f"📋 اختر الفئة من مطعم {restaurant_name}:",
-                reply_markup=reply_markup
+                "👇 بدك مساعدة؟",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("بدك مساعدة؟ 🌝", callback_data="help_with_order_flow")]
+                ])
             )
 
     except Exception as e:
         logger.error(f"❌ Database error in show_restaurant_categories: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء جلب الفئات. حاول مرة أخرى لاحقاً.")
+
+
+
+
+async def send_order_help_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "🙋  إذا كنت حابب تختار سندويشة + كولا 👈 اختر فئة السندويش 👈 شاورما "
+            "بعدين فيك تختار فئة المشروبات ببساطة وتختار كولا 👈 تم ✅\n\n"
+            "🙋  إذا غيرت رأيك حتى لو فتت عفئات تانية "
+            "فيك ترجع على فئة السندويش 👈 وتضغط على حذف أخر لمسة عند الشاورما 👈 "
+            "وهيك بصير طلبك كولا بس 🙂\n\n"
+            "🙋  حابب تصفر الطلب وترجع تغير مطعمك 👈 اختر القائمة الرئيسية 🤗"
+        )
+    )
+
+
+
+async def handle_order_flow_help(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    await send_order_help_text(update, context)
+
 
 
 
@@ -2237,9 +2332,9 @@ async def handle_order_category(update: Update, context: CallbackContext) -> int
     return await process_category_selection(update, context)
 
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
-    category = update.message.text
+    category_name = update.message.text
 
-    if category == "القائمة الرئيسية 🪧":
+    if category_name == "القائمة الرئيسية 🪧":
         reply_markup = ReplyKeyboardMarkup([
             ["اطلب عالسريع 🔥"],
             ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
@@ -2250,40 +2345,34 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
     selected_restaurant_id = context.user_data.get('selected_restaurant_id')
     selected_restaurant_name = context.user_data.get('selected_restaurant_name')
+    category_map = context.user_data.get("category_map", {})
 
     if not selected_restaurant_id or not selected_restaurant_name:
         await update.message.reply_text("❌ لم يتم تحديد المطعم. يرجى اختيار مطعم أولاً.")
         return SELECT_RESTAURANT
 
-    context.user_data['selected_category'] = category
+    category_id = category_map.get(category_name)
+    if not category_id:
+        await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
+        return ORDER_CATEGORY
+
+    # تخزين الفئة المختارة
+    context.user_data['selected_category_id'] = category_id
+    context.user_data['selected_category_name'] = category_name
 
     # 🧹 حذف رسائل الوجبات السابقة
     previous_meal_msgs = context.user_data.get("current_meal_messages", [])
-    if previous_meal_msgs:
-        for msg_id in previous_meal_msgs:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
-            except:
-                pass
+    for msg_id in previous_meal_msgs:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
+        except:
+            pass
     context.user_data["current_meal_messages"] = []
 
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # جلب معرف الفئة
-                await cursor.execute("""
-                    SELECT id FROM categories 
-                    WHERE name = %s AND restaurant_id = %s
-                """, (category, selected_restaurant_id))
-                result = await cursor.fetchone()
-
-                if not result:
-                    await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
-                    return ORDER_CATEGORY
-
-                category_id = result[0]
-
-                # جلب الوجبات
+                # جلب الوجبات المرتبطة بـ category_id
                 await cursor.execute("""
                     SELECT id, name, caption, image_message_id, size_options
                     FROM meals
@@ -2343,26 +2432,17 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                         msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
                         context.user_data["current_meal_messages"].append(msg.message_id)
 
-                # عرض الفئات مرة أخرى
-                await cursor.execute("""
-                    SELECT name FROM categories
-                    WHERE restaurant_id = %s
-                    ORDER BY name
-                """, (selected_restaurant_id,))
-                rows = await cursor.fetchall()
-
-        categories = [row[0] for row in rows]
-        categories.append("تم ✅")
-
-        reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
-        await update.message.reply_text(
-            "اذا حاطط ببالك مشروب كمان او أي شي فيك تختار من القائمة اسفل الشاشة 👇 وبس تخلص تم 👌",
-            reply_markup=reply_markup
-        )
-        return ORDER_MEAL
+                # إعادة عرض الفئات
+                categories = list(category_map.keys()) + ["تم ✅"]
+                reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
+                await update.message.reply_text(
+                    "اذا حاطط ببالك مشروب كمان أو أي شي، فيك تختار من القائمة أسفل الشاشة 👇 وبس تخلص اضغط تم 👌",
+                    reply_markup=reply_markup
+                )
+                return ORDER_MEAL
 
     except Exception as e:
-        logger.error(f"Database error in handle_order_category: {e}")
+        logger.error(f"Database error in process_category_selection: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
         return ORDER_CATEGORY
 
@@ -2384,36 +2464,34 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 
 
-
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
 
-    # استخراج اسم الوجبة والحجم
-    _, meal_name, size = query.data.split(":")
+    # ✅ استخراج meal_id واسم الحجم من callback_data
+    _, meal_id_str, size = query.data.split(":")
+    meal_id = int(meal_id_str)
 
     user_id = update.effective_user.id
-    selected_restaurant = context.user_data.get('selected_restaurant')
 
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
+                # ✅ جلب معلومات الوجبة باستخدام meal_id
                 await cursor.execute("""
-                    SELECT m.price, m.size_options
-                    FROM meals m
-                    JOIN categories c ON m.category_id = c.id
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE m.name = %s AND r.name = %s
-                """, (meal_name, selected_restaurant))
+                    SELECT name, price, size_options
+                    FROM meals
+                    WHERE id = %s
+                """, (meal_id,))
                 result = await cursor.fetchone()
 
                 if not result:
                     await query.message.reply_text("❌ لم يتم العثور على الوجبة.")
                     return ORDER_MEAL
 
-                base_price, size_options_json = result
+                meal_name, base_price, size_options_json = result
 
-                # حساب السعر بناءً على الحجم
+                # حساب السعر بناءً على الحجم المختار
                 price = base_price
                 if size != "default" and size_options_json:
                     try:
@@ -2425,7 +2503,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     except:
                         price = base_price
 
-               
                 item_data = {
                     "name": meal_name,
                     "size": size,
@@ -2434,7 +2511,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 orders, total_price = await add_item_to_cart(user_id, item_data)
 
-                # تحديث context.user_data أيضاً للتوافق مع الكود الحالي
+                # تخزين في السياق
                 context.user_data['orders'] = orders
                 context.user_data['temporary_total_price'] = total_price
 
@@ -2454,14 +2531,11 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
 
-                # حذف الرسالة السابقة إن وجدت
+                # حذف الملخص السابق إن وُجد
                 summary_msg_id = context.user_data.get("summary_msg_id")
                 if summary_msg_id:
                     try:
-                        await context.bot.delete_message(
-                            chat_id=update.effective_chat.id,
-                            message_id=summary_msg_id
-                        )
+                        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=summary_msg_id)
                     except:
                         pass
 
@@ -2469,7 +2543,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 msg = await query.message.reply_text(text)
                 context.user_data["summary_msg_id"] = msg.message_id
 
-                
                 await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
                 return ORDER_MEAL
@@ -2478,6 +2551,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
         logger.error(f"❌ خطأ أثناء إضافة الوجبة: {e}")
         await query.message.reply_text("❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً.")
         return ORDER_MEAL
+
 
 
 
@@ -2554,17 +2628,14 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
 
 
-
-async def get_meal_names_in_category(category: str, restaurant: str) -> list:
+async def get_meal_names_in_category(category_id: int) -> list:
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT m.name FROM meals m
-                    JOIN categories c ON m.category_id = c.id
-                    JOIN restaurants r ON c.restaurant_id = r.id
-                    WHERE c.name = %s AND r.name = %s
-                """, (category, restaurant))
+                    SELECT name FROM meals
+                    WHERE category_id = %s
+                """, (category_id,))
                 rows = await cursor.fetchall()
         return [row[0] for row in rows]
     except Exception as e:
@@ -2576,73 +2647,81 @@ async def get_meal_names_in_category(category: str, restaurant: str) -> list:
 
 
 async def show_meals_in_category(update: Update, context: CallbackContext):
-    selected_restaurant = context.user_data.get("selected_restaurant")
-    selected_category = context.user_data.get("selected_category")
+    category_id = context.user_data.get("selected_category_id")
 
-    if not selected_restaurant or not selected_category:
-        await update.message.reply_text("❌ حدث خطأ: لم يتم تحديد المطعم أو الفئة.")
+    if not category_id:
+        await update.message.reply_text("❌ حدث خطأ: لم يتم تحديد الفئة.")
         return
 
-    cursor = db_conn.cursor()
-    cursor.execute("""
-        SELECT m.name, m.caption, m.image_file_id, m.size_options
-        FROM meals m
-        JOIN categories c ON m.category_id = c.id
-        JOIN restaurants r ON c.restaurant_id = r.id
-        WHERE c.name = ? AND r.name = ?
-    """, (selected_category, selected_restaurant))
-    meals = cursor.fetchall()
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT id, name, caption, image_message_id, size_options
+                    FROM meals
+                    WHERE category_id = %s
+                """, (category_id,))
+                meals = await cursor.fetchall()
 
-    if not meals:
-        await update.message.reply_text("❌ لا توجد وجبات في هذه الفئة.")
-        return
+        if not meals:
+            await update.message.reply_text("❌ لا توجد وجبات في هذه الفئة.")
+            return
 
-    for meal in meals:
-        meal_name, caption, image_file_id, size_options_json = meal
-        try:
-            sizes = json.loads(size_options_json) if size_options_json else []
-        except json.JSONDecodeError:
-            sizes = []
+        for meal_id, meal_name, caption, image_message_id, size_options_json in meals:
+            try:
+                sizes = json.loads(size_options_json or "[]")
+            except json.JSONDecodeError:
+                sizes = []
 
-        # تجهيز الأزرار
-        buttons = []
-        if sizes:
-            size_buttons = []
-            for size in sizes:
-                size_buttons.append(
+            buttons = []
+            if sizes:
+                size_buttons = [
                     InlineKeyboardButton(
                         f"{size['name']} - {size['price']} ل.س",
-                        callback_data=f"add_meal_with_size:{meal_name}:{size['name']}"
+                        callback_data=f"add_meal_with_size:{meal_id}:{size['name']}"
                     )
-                )
-            buttons.append(size_buttons)
+                    for size in sizes
+                ]
+                buttons.append(size_buttons)
+            else:
+                buttons.append([
+                    InlineKeyboardButton("➕ أضف للسلة", callback_data=f"add_meal_with_size:{meal_id}:default")
+                ])
+
             buttons.append([
                 InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal"),
                 InlineKeyboardButton("✅ تم", callback_data="done_adding_meals")
             ])
-        else:
-            buttons.append([
-                InlineKeyboardButton("➕ أضف للسلة", callback_data=f"add_meal_with_size:{meal_name}:default"),
-                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
-            ])
-            buttons.append([
-                InlineKeyboardButton("✅ تم", callback_data="done_adding_meals")
-            ])
 
-        reply_markup = InlineKeyboardMarkup(buttons)
+            reply_markup = InlineKeyboardMarkup(buttons)
 
-        # إرسال الصورة أو النص فقط
-        if image_file_id:
-            await update.message.reply_photo(
-                photo=image_file_id,
-                caption=f"{meal_name}\n\n{caption}" if caption else meal_name,
-                reply_markup=reply_markup
-            )
-        else:
-            await update.message.reply_text(
-                f"{meal_name}\n\n{caption}" if caption else meal_name,
-                reply_markup=reply_markup
-            )
+            # إرسال الصورة
+            if image_message_id:
+                try:
+                    await context.bot.copy_message(
+                        chat_id=update.effective_chat.id,
+                        from_chat_id=ADMIN_MEDIA_CHANNEL,
+                        message_id=int(image_message_id)
+                    )
+                    await update.message.reply_text(
+                        f"{meal_name}\n\n{caption}" if caption else meal_name,
+                        reply_markup=reply_markup
+                    )
+                except Exception as e:
+                    logger.error(f"❌ فشل تحميل صورة الوجبة '{meal_name}': {e}")
+                    await update.message.reply_text(
+                        f"{meal_name}\n\n{caption}" if caption else meal_name,
+                        reply_markup=reply_markup
+                    )
+            else:
+                await update.message.reply_text(
+                    f"{meal_name}\n\n{caption}" if caption else meal_name,
+                    reply_markup=reply_markup
+                )
+
+    except Exception as e:
+        logger.error(f"❌ خطأ في show_meals_in_category: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات.")
 
 
 
@@ -3148,7 +3227,7 @@ async def process_confirm_final_order(update, context):
 
 
 async def handle_cashier_interaction(update: Update, context: CallbackContext) -> None:
-    """ 📩 يلتقط رد الكاشير من القناة ويحدد المستخدم صاحب الطلب لإرسال الإشعار إليه """
+    """📩 يلتقط رد الكاشير من القناة ويحدد المستخدم صاحب الطلب لإرسال الإشعار إليه"""
 
     channel_post = update.channel_post
     if not channel_post or not channel_post.text:
@@ -3166,76 +3245,71 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
     order_id = match.group(1)
     logger.info(f"🔍 البحث عن الطلب ID: {order_id}")
 
-    # ✅ البحث عن المستخدم
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT user_id FROM user_orders WHERE order_id = ?", (order_id,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT user_id FROM user_orders WHERE order_id = %s", (order_id,))
                 user_result = await cursor.fetchone()
 
-            if not user_result:
-                logger.warning(f"⚠️ لم يتم العثور على مستخدم لهذا الطلب: {order_id}")
-                return
+        if not user_result:
+            logger.warning(f"⚠️ لم يتم العثور على مستخدم لهذا الطلب: {order_id}")
+            return
 
-            user_id = user_result[0]
-            logger.info(f"📩 سيتم إرسال رسالة إلى المستخدم: {user_id}")
+        user_id = user_result[0]
+        logger.info(f"📩 سيتم إرسال رسالة إلى المستخدم: {user_id}")
 
-            # ✅ إعداد الرسالة والخيارات بناءً على نوع الإشعار
-            if "تم رفض الطلب" in text:
-                message_text = (
-                    "❌ *نعتذر، لم يتم قبول طلبك.*\n\n"
-                    "السبب: ممكن معلوماتك ما مكتملة أو منطقتك بعيدة عن المطعم كتير.\n"
-                    "فيك تعدل معلوماتك أو حاول من مطعم تاني.\n\n"
-                    "🔥 إذا حسيت في شي غلط، اختار *التواصل مع الدعم 🎧* من القائمة وبيعالجولك وضعك عالسريع.\n\n"
-                    "📌 *معرف الطلب:* `" + order_id + "`"
-                )
+        # ✅ إعداد الرسالة والخيارات بناءً على نوع الإشعار
+        if "تم رفض الطلب" in text:
+            message_text = (
+                "❌ *نعتذر، لم يتم قبول طلبك.*\n\n"
+                "السبب: ممكن معلوماتك ما مكتملة أو منطقتك بعيدة عن المطعم كتير.\n"
+                "فيك تعدل معلوماتك أو حاول من مطعم تاني.\n\n"
+                "🔥 إذا حسيت في شي غلط، اختار *التواصل مع الدعم 🎧* من القائمة وبيعالجولك وضعك عالسريع.\n\n"
+                f"📌 *معرف الطلب:* `{order_id}`"
+            )
 
+            reply_markup = ReplyKeyboardMarkup([
+                ["اطلب عالسريع 🔥"],
+                ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+                ["من نحن 🏢", "أسئلة متكررة ❓"]
+            ], resize_keyboard=True)
 
-                # ✅ إظهار القائمة الرئيسية
-                reply_markup = ReplyKeyboardMarkup([
-                    ["اطلب عالسريع 🔥"],
-                    ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-                    ["من نحن 🏢", "أسئلة متكررة ❓"]
-                ], resize_keyboard=True)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
 
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode="Markdown",
-                    reply_markup=reply_markup
-                )
+        elif "تم قبول الطلب" in text or "جاري تحضير الطلب" in text:
+            message_text = (
+                "بسلم عليك المطعم 😄\n"
+                "وبقلك بلشنا بطلبك عالسريع 🔥\n\n"
+                "رح نبعتلك مين بدو يوصلك ياه لعندك 🚴‍♂️ بس يجهز 🔥\n\n"
+                f"📌 *معرف الطلب:* `{order_id}`"
+            )
 
-            elif "تم قبول الطلب" in text or "جاري تحضير الطلب" in text:
-                message_text = (
-                    "بسلم عليك المطعم 😄\n"
-                    "وبقلك بلشنا بطلبك عالسريع 🔥\n\n"
-                    "رح نبعتلك مين بدو يوصلك ياه لعندك 🚴‍♂️ بس يجهز 🔥\n\n"
-                    "📌 *معرف الطلب:* `" + order_id + "`"
-                )
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode="Markdown"
+            )
 
+        elif "الطلب جاهز للتوصيل" in text:
+            message_text = (
+                "🚚 *طلبك جاهز للتوصيل!*\n\n"
+                "🕒 سيصلك قريباً، يرجى التأكد من تواجدك في العنوان المحدد.\n\n"
+                f"📌 *معرف الطلب:* `{order_id}`"
+            )
 
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode="Markdown"
-                )
-
-            elif "الطلب جاهز للتوصيل" in text:
-                message_text = (
-                    "🚚 *طلبك جاهز للتوصيل!*\n\n"
-                    "🕒 سيصلك قريباً، يرجى التأكد من تواجدك في العنوان المحدد.\n\n"
-                    "📌 *معرف الطلب:* `" + order_id + "`"
-                )
-
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=message_text,
-                    parse_mode="Markdown"
-                )
-
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode="Markdown"
+            )
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء معالجة تفاعل الكاشير: {e}")
-
 
 
 
@@ -4304,12 +4378,12 @@ async def handle_report_based_cancellation(update: Update, context: CallbackCont
 
 
 
-
 async def reset_user_and_restart(user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
-        async with aiosqlite.connect("database.db") as db:
-            await db.execute("DELETE FROM user_data WHERE user_id = ?", (user_id,))
-            await db.commit()
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("DELETE FROM user_data WHERE user_id = %s", (user_id,))
+            await conn.commit()
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -4318,12 +4392,11 @@ async def reset_user_and_restart(user_id: int, context: ContextTypes.DEFAULT_TYP
                  "سنبدأ من جديد الآن."
         )
 
-        # تخصيص دالة start لتقبل user_id وحده
+        # تخصيص دالة start لتقبل user_id وحده (تحتاج لتعديل دالة start لدعم هذا إن لم تكن تدعمه)
         await start(update=None, context=context, user_id=user_id)
 
     except Exception as e:
         logger.exception(f"❌ خطأ أثناء تنفيذ reset_user_and_restart للمستخدم {user_id}: {e}")
-
 
 
 
@@ -4349,7 +4422,6 @@ async def safe_request(bot_func, *args, **kwargs):
 
 
 
-
 async def handle_vip_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
@@ -4367,41 +4439,48 @@ async def handle_vip_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     # ✅ التحقق من التسجيل
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT city_id FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT city_id FROM users WHERE user_id = %s", (user_id,))
+                row = await cursor.fetchone()
 
-    if not row:
-        await update.message.reply_text("👋 لازم تسجل معلوماتك أولاً من خيار 'خلينا نبلش 😁'.")
+        if not row:
+            await update.message.reply_text("👋 لازم تسجل معلوماتك أولاً من خيار 'خلينا نبلش 😁'.")
+            return ConversationHandler.END
+
+        if row[0] != city_id:
+            await update.message.reply_text("❌ هذا الإعلان موجه لمدينة أخرى.")
+            return ConversationHandler.END
+
+        # ✅ التحقق من الطلبات الجارية
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM orders WHERE user_id = %s AND status = 'قيد التنفيذ'", (user_id,))
+                active_order = await cursor.fetchone()
+
+        if active_order:
+            await update.message.reply_text("🚫 لا يمكنك فتح عرض جديد أثناء وجود طلب قيد التنفيذ.")
+            return ConversationHandler.END
+
+        # ✅ تفريغ السلة والانتقال للفئات
+        context.user_data["orders"] = []
+        context.user_data["selected_restaurant_id"] = restaurant_id
+
+        return await show_restaurant_categories(update, context, from_ad=True)
+
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء تنفيذ handle_vip_start: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء معالجة الإعلان.")
         return ConversationHandler.END
 
-    if row[0] != city_id:
-        await update.message.reply_text("❌ هذا الإعلان موجه لمدينة أخرى.")
-        return ConversationHandler.END
+BOT_USERNAME = "@YALA_FAST_bot"
 
-    # ✅ التحقق من الطلبات الجارية
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM orders WHERE user_id = ? AND status = 'قيد التنفيذ'", (user_id,))
-    active_order = cursor.fetchone()
-    conn.close()
 
-    if active_order:
-        await update.message.reply_text("🚫 لا يمكنك فتح عرض جديد أثناء وجود طلب قيد التنفيذ.")
-        return ConversationHandler.END
 
-    # ✅ تفريغ السلة والانتقال للفئات
-    context.user_data["orders"] = []
-    context.user_data["selected_restaurant_id"] = restaurant_id
-
-    return await show_restaurant_categories(update, context, from_ad=True)
-
-BOT_USERNAME = "Fasterone1200_bot"  # اسم بوت الزبون بدون @
 
 async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "channel":
+    if update.message.chat.type != ChatType.CHANNEL:
         return
 
     if not update.message.reply_markup or not update.message.reply_markup.inline_keyboard:
@@ -4417,22 +4496,29 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
         parts = url.split("start=vip_")[1].split("_")
         city_id = int(parts[0])
         restaurant_id = int(parts[1]) if len(parts) > 1 else None
-    except Exception as e:
+    except Exception:
         return
 
-    # جلب المستخدمين المسجلين في المدينة
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE city_id = ?", (city_id,))
-    users = [row[0] for row in cursor.fetchall()]
-    conn.close()
+    # 🔄 جلب المستخدمين المسجلين في المدينة
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT user_id FROM users WHERE city_id = %s", (city_id,))
+                rows = await cursor.fetchall()
+                users = [row[0] for row in rows]
+    except Exception as e:
+        logger.error(f"❌ فشل في جلب المستخدمين للإعلان VIP: {e}")
+        return
 
-    # تجهيز الزر إن وُجد مطعم
+    # 🎯 تجهيز الزر إن وُجد مطعم
     button_markup = None
     if restaurant_id:
         vip_link = f"https://t.me/{BOT_USERNAME}?start=vip_{city_id}_{restaurant_id}"
-        button_markup = InlineKeyboardMarkup([[InlineKeyboardButton("اكبسني 😉", url=vip_link)]])
+        button_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("اكبسني 😉", url=vip_link)]
+        ])
 
+    # 📨 إرسال الرسائل للمستخدمين
     for user_id in users:
         try:
             if update.message.photo:
@@ -4459,9 +4545,7 @@ async def handle_vip_broadcast_message(update: Update, context: ContextTypes.DEF
                     reply_markup=button_markup
                 )
         except Exception as e:
-            
-            return
-
+            logger.warning(f"⚠️ لم نتمكن من إرسال الإعلان للمستخدم {user_id}: {e}")
 
 
 
@@ -4470,7 +4554,7 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
     message = update.message
 
-    if message and message.text and message.text.startswith("/start "):  # يحتوي على بارامتر
+    if message and message.text and message.text.startswith("/start "):
         arg = message.text.split("/start ", 1)[1].strip()
         print(f"handle_ad_start: Processing /start with arguments: '{arg}' for user {user_id}")
 
@@ -4480,11 +4564,10 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return ConversationHandler.END
         context.user_data["last_ad_click_time"] = now
 
-        # ✅ إعلان go_ لعرض مطعم محدد ضمن القائمة
+        # ✅ إعلان go_
         if arg.startswith("go_"):
-            # استخراج اسم المطعم وإبراز اسمه لاحقًا في "اطلب عالسريع 🔥"
             restaurant_name = arg.replace("go_", "").strip()
-            context.user_data["go_ad_restaurant_name"] = restaurant_name  # سيتم استخدامه لاحقًا
+            context.user_data["go_ad_restaurant_name"] = restaurant_name
 
             await message.reply_text(
                 "📢 *يالله عالسرييع 🔥*\n\n"
@@ -4502,8 +4585,9 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 _, city_id_str, restaurant_id_str = arg.split("_", 2)
                 city_id = int(city_id_str)
 
-                async with aiosqlite.connect("database.db") as db:
-                    async with db.execute("SELECT city_id FROM user_data WHERE user_id = ?", (user_id,)) as cursor:
+                async with get_db_connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
                         row = await cursor.fetchone()
 
                 if not row:
@@ -4514,7 +4598,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     await message.reply_text("❌ هذا الإعلان غير موجه لمدينتك.")
                     return ConversationHandler.END
 
-                # ✅ كل شيء صحيح - يمكن بدء تدفق عرض VIP
                 context.user_data["selected_restaurant_id"] = int(restaurant_id_str)
                 context.user_data["orders"] = []
                 return await show_restaurant_categories(update, context, from_ad=True)
@@ -4528,7 +4611,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await message.reply_text("❌ حدث خطأ أثناء معالجة الإعلان.")
                 return ConversationHandler.END
 
-        # ⛔️ رابط غير معروف
         else:
             await message.reply_text("⚠️ هذا النوع من الإعلانات غير مدعوم.")
             return ConversationHandler.END
@@ -4536,10 +4618,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     else:
         print(f"handle_ad_start: Plain /start detected for user {user_id}.")
         return await start(update, context)
-
-
-
-
 
 
 
@@ -4559,10 +4637,10 @@ async def handle_delivery_assignment(update: Update, context: CallbackContext):
 
     order_id = match.group(1)
 
-    # البحث عن المستخدم من جدول user_orders
     try:
-        async with aiosqlite.connect("database.db") as db:
-            async with db.execute("SELECT user_id FROM user_orders WHERE order_id = ?", (order_id,)) as cursor:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT user_id FROM user_orders WHERE order_id = %s", (order_id,))
                 row = await cursor.fetchone()
 
         if not row:
@@ -4595,8 +4673,6 @@ async def handle_delivery_assignment(update: Update, context: CallbackContext):
 
     except Exception as e:
         logger.error(f"❌ خطأ في handle_delivery_assignment: {e}")
-
-
 
 
 
@@ -4876,6 +4952,11 @@ def run_user_bot () :
     application.add_handler(CallbackQueryHandler(handle_faq_response, pattern="^faq_(refusal|eta|issue|ban|no_delivery|repeat_cancel)$"))
     application.add_handler(CallbackQueryHandler(handle_faq_back, pattern="^faq_back$"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
+
+    app.add_handler(CallbackQueryHandler(explain_location_instruction, pattern="^how_to_send_location$"))
+    app.add_handler(CallbackQueryHandler(handle_order_flow_help, pattern="^help_with_order_flow$"))
+
+
     
     # الأخطاء
     application.add_error_handler(error_handler)
