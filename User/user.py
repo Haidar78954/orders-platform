@@ -1223,47 +1223,38 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
 
 
 
-
 async def handle_custom_city(update: Update, context: CallbackContext) -> int:
-    city_name = update.message.text
-    province = context.user_data.get('province_name', '')
-
-    if city_name == "عودة ➡️":
+    if update.message.text == "عودة ➡️":
         try:
+            province = context.user_data.get('province_name', '')
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
-                    # جلب معرف المحافظة
                     await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province,))
                     result = await cursor.fetchone()
+                    if not result:
+                        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                        return ASK_PROVINCE
 
-                if not result:
-                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
-                    return ASK_PROVINCE
-
-                province_id = result[0]
-
-                # جلب المدن من قاعدة البيانات
-                async with conn.cursor() as cursor:
+                    province_id = result[0]
                     await cursor.execute("SELECT name FROM cities WHERE province_id = %s", (province_id,))
                     rows = await cursor.fetchall()
 
             cities = [row[0] for row in rows]
             city_options = cities + ["وين مدينتي ؟ 😟", "عودة ➡️"]
-
-            reply_markup = ReplyKeyboardMarkup(
-                [[city] for city in city_options],
-                resize_keyboard=True
-            )
+            reply_markup = ReplyKeyboardMarkup([[city] for city in city_options], resize_keyboard=True)
             await update.message.reply_text("بأي مدينة ؟ 😁", reply_markup=reply_markup)
             return ASK_CITY
 
         except Exception as e:
             logger.error(f"Database error in handle_custom_city (عودة): {e}")
-            await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقًا.")
+            await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقاً.")
             return ASK_CITY
 
-    # ✅ إرسال المدينة المقترحة إلى قناة الدعم
-    custom_city_channel = "@Lamtozkar"  # ← يمكنك تغييره
+    # باقي الكود بعد التأكد أن المستخدم لم يضغط على "عودة"
+    city_name = update.message.text.strip()
+    province = context.user_data.get('province_name', '')
+
+    custom_city_channel = "@Lamtozkar"
 
     await context.bot.send_message(
         chat_id=custom_city_channel,
@@ -1278,34 +1269,31 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
         "يرجى اختيار المدينة من القائمة:"
     )
 
-    # ✅ إعادة المستخدم لاختيار المدينة من قاعدة البيانات
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province,))
                 result = await cursor.fetchone()
+                if not result:
+                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                    return ASK_PROVINCE
 
-            if not result:
-                await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
-                return ASK_PROVINCE
-
-            province_id = result[0]
-
-            async with conn.cursor() as cursor:
+                province_id = result[0]
                 await cursor.execute("SELECT name FROM cities WHERE province_id = %s", (province_id,))
                 rows = await cursor.fetchall()
 
         cities = [row[0] for row in rows]
-        city_options = cities + ["بأي مدينة ؟ 😁", "عودة ➡️"]
-
+        city_options = cities + ["وين مدينتي ؟ 😟", "عودة ➡️"]
         reply_markup = ReplyKeyboardMarkup([[city] for city in city_options], resize_keyboard=True)
         await update.message.reply_text("بأي مدينة ؟ 😁", reply_markup=reply_markup)
         return ASK_CITY
 
     except Exception as e:
         logger.error(f"Database error in handle_custom_city (إعادة): {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقًا.")
+        await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقاً.")
         return ASK_CITY
+
+
 
 
 async def ask_location(update: Update, context: CallbackContext) -> int:
@@ -1395,8 +1383,13 @@ async def ask_area_name(update: Update, context: CallbackContext) -> int:
     return ASK_AREA_NAME
 
 async def handle_area_name(update: Update, context: CallbackContext) -> int:
-    area_name = update.message.text.strip()
-    context.user_data["temporary_area_name"] = area_name
+    text = update.message.text.strip()
+
+    if text == "عودة ➡️":
+        # إذا اختار العودة، نرجع لسؤال إرسال الموقع
+        return await ask_location(update, context)
+
+    context.user_data["temporary_area_name"] = text
 
     reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
     await update.message.reply_text("وين بالضبط ؟ 🤨", reply_markup=reply_markup)
@@ -1405,10 +1398,11 @@ async def handle_area_name(update: Update, context: CallbackContext) -> int:
 
     return ASK_DETAILED_LOCATION
 
-async def ask_detailed_location(update: Update, context: CallbackContext) -> int:
-    context.user_data['detailed_location'] = update.message.text.strip()
 
-    await update.message.reply_text("وين بالضبط ؟ 🤨")
+async def ask_detailed_location(update: Update, context: CallbackContext) -> int:
+    reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
+
+    await update.message.reply_text("وين بالضبط ؟ 🤨", reply_markup=reply_markup)
     await asyncio.sleep(2)
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
     await asyncio.sleep(2)
@@ -1420,6 +1414,7 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     await update.message.reply_text("خلصت هي اخر سؤال 😁")
 
     return ASK_DETAILED_LOCATION
+
 
 
 async def confirm_info(update: Update, context: CallbackContext) -> int:
@@ -4842,11 +4837,11 @@ conv_handler = ConversationHandler(
         ],
         ASK_AREA_NAME: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_area_name),
-            MessageHandler(filters.Regex("عودة ➡️"), ask_order_location)
+            MessageHandler(filters.Regex("عودة ➡️"), ask_location)
         ],
         ASK_DETAILED_LOCATION: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_info),
-            MessageHandler(filters.Regex("عودة ➡️"), ask_location)
+            MessageHandler(filters.Regex("عودة ➡️"), ask_area_name)
         ],
         CONFIRM_INFO: [
             MessageHandler(filters.Regex("اي ولو 😏"), handle_confirmation),
