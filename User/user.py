@@ -1908,9 +1908,11 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             return SELECT_RESTAURANT
 
         except Exception as e:
-            logger.error(f"Database error in fast order: {e}")
-            await update.message.reply_text("❌ حدث خطأ أثناء معالجة الطلب السريع.")
+            import traceback
+            logger.exception(f"❌ Database error in fast order: {e}")
+            await update.message.reply_text(f"❌ خطأ داخلي:\n{e}")
             return MAIN_MENU
+
 
 
 
