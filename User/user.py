@@ -2489,13 +2489,16 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                 except Exception as text_error:
                     logger.error(f"❌ فشل عرض النص فقط: {text_error}")
 
-        categories = list(category_map.keys()) + ["تم ✅"]
-        reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
+        categories = list(category_map.keys())
+        keyboard = [[cat] for cat in categories]  # كل فئة في سطر منفصل
+        keyboard.append(["تم ✅", "القائمة الرئيسية 🪧"])  # زرّان في نفس السطر
+        
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             "اذا حاطط ببالك مشروب كمان أو أي شي، فيك تختار من القائمة أسفل الشاشة 👇 وبس تخلص اضغط تم 👌",
             reply_markup=reply_markup
         )
-
+        
         return ORDER_CATEGORY
 
     except Exception as e:
@@ -5007,7 +5010,8 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_missing_restaurant)
         ],
         ORDER_CATEGORY: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_order_category)
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_order_category),
+            MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu)
         ],
         ORDER_MEAL: [
             CallbackQueryHandler(handle_add_meal_with_size, pattern="^add_meal_with_size:"),
