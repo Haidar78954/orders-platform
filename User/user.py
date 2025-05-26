@@ -2137,62 +2137,53 @@ async def check_restaurant_availability(restaurant_id: int) -> bool:
 
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT open_hour, close_hour, is_frozen FROM restaurants WHERE id = %s",
-                    (restaurant_id,)
-                )
+                await cursor.execute("""
+                    SELECT open_hour, close_hour, is_frozen
+                    FROM restaurants
+                    WHERE id = %s
+                """, (restaurant_id,))
                 result = await cursor.fetchone()
 
         if not result:
-            logger.warning(f"⚠️ لم يتم العثور على المطعم بالمعرف: {restaurant_id}")
+            logger.warning(f"⚠️ المطعم غير موجود: {restaurant_id}")
             return False
 
         open_hour, close_hour, is_frozen = result
-
         if is_frozen:
-            logger.info(f"🚫 المطعم بالمعرف {restaurant_id} مجمد حالياً.")
             return False
 
-        available = open_hour <= now_hour < close_hour
-        logger.debug(f"🕒 المطعم بالمعرف {restaurant_id} مفتوح الآن؟ {available} (الساعة الحالية: {now_hour})")
-        return available
+        return open_hour <= now_hour < close_hour
 
     except Exception as e:
-        logger.exception(f"❌ خطأ أثناء التحقق من توفر المطعم بالمعرف {restaurant_id}: {e}")
+        logger.exception(f"❌ خطأ في check_restaurant_availability: {e}")
         return False
 
-
-async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAULT_TYPE, from_ad=False):
+async def show_restaurant_categories(update: Update, context: CallbackContext) -> int:
     restaurant_id = context.user_data.get("selected_restaurant_id")
 
     if not restaurant_id:
         await update.message.reply_text("❌ لم يتم تحديد المطعم.")
-        return
+        return MAIN_MENU
 
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # جلب اسم المطعم
                 await cursor.execute("SELECT name FROM restaurants WHERE id = %s", (restaurant_id,))
                 row = await cursor.fetchone()
-
                 if not row:
-                    await update.message.reply_text("❌ لم يتم العثور على المطعم.")
-                    return
+                    await update.message.reply_text("❌ لم يتم العثور على اسم المطعم.")
+                    return MAIN_MENU
 
                 restaurant_name = row[0]
                 context.user_data["selected_restaurant_name"] = restaurant_name
-                context.user_data["current_cart_restaurant"] = restaurant_name
 
-                # جلب الفئات: id + name
                 await cursor.execute("SELECT id, name FROM categories WHERE restaurant_id = %s ORDER BY name", (restaurant_id,))
                 rows = await cursor.fetchall()
 
         if not rows:
-            await update.message.reply_text("❌ لا توجد فئات مسجلة لهذا المطعم حالياً.")
-            return
+            await update.message.reply_text("❌ لا توجد فئات لهذا المطعم حالياً.")
+            return MAIN_MENU
 
-        # إعداد الكيبورد + تخزين map
         category_map = {}
         keyboard = []
         for category_id, name in rows:
@@ -2200,27 +2191,16 @@ async def show_restaurant_categories(update: Update, context: ContextTypes.DEFAU
             category_map[name] = category_id
 
         context.user_data["category_map"] = category_map
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-        open_count = context.user_data.get("category_screen_count", 0)
-        context.user_data["category_screen_count"] = open_count + 1
-
-        if open_count == 0:
-            await update.message.reply_text(f"📋 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
-            await asyncio.sleep(1)
-            await send_order_help_text(update, context)
-        else:
-            await update.message.reply_text(f"📋 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
-            await update.message.reply_text(
-                "👇 بدك مساعدة؟",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("بدك مساعدة؟ 🌝", callback_data="help_with_order_flow")]
-                ])
-            )
+        reply_markup = ReplyKeyboardMarkup(keyboard + [["القائمة الرئيسية 🪧"]], resize_keyboard=True)
+        await update.message.reply_text(f"📋 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
+        return ORDER_CATEGORY
 
     except Exception as e:
         logger.error(f"❌ Database error in show_restaurant_categories: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء جلب الفئات. حاول مرة أخرى لاحقاً.")
+        await update.message.reply_text("❌ حدث خطأ أثناء جلب الفئات.")
+        return MAIN_MENU
+
 
 
 
@@ -2283,6 +2263,7 @@ async def has_active_order(user_id: int) -> bool:
         return False
 
 
+
 async def handle_missing_restaurant(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     text = update.message.text.strip()
@@ -2290,23 +2271,16 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
     try:
         async with get_db_connection() as conn:
             if text == "عودة ➡️":
+                # ✅ جلب city_id من user_data
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
                     row = await cursor.fetchone()
                 if not row:
-                    await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
+                    await update.message.reply_text("❌ لم يتم العثور على المدينة. يرجى إعادة التسجيل.")
                     return await start(update, context)
                 city_id = row[0]
-                context.user_data["city_id"] = city_id  # ✅ تخزين معرف المدينة
 
-                async with conn.cursor() as cursor:
-                    await cursor.execute("SELECT name FROM cities WHERE id = %s", (city_id,))
-                    row = await cursor.fetchone()
-                if not row:
-                    await update.message.reply_text("❌ لم يتم العثور على اسم المدينة.")
-                    return await start(update, context)
-                city_name = row[0]
-
+                # ✅ جلب المطاعم المتاحة
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                     rows = await cursor.fetchall()
@@ -2314,20 +2288,19 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 restaurants = []
                 restaurant_map = {}
 
-                for restaurant_id, name, is_frozen in rows:
+                for rest_id, name, is_frozen in rows:
                     if is_frozen:
                         continue
+
                     async with conn.cursor() as cursor:
-                        await cursor.execute(
-                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
-                            (restaurant_id,)
-                        )
+                        await cursor.execute("SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s", (rest_id,))
                         rating_data = await cursor.fetchone()
 
                     avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
                     label = f"{name} ⭐ ({avg})"
+
                     restaurants.append(label)
-                    restaurant_map[label] = {"id": restaurant_id, "name": name}
+                    restaurant_map[name] = {"id": rest_id, "name": name}
 
                 restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕"]
                 context.user_data["restaurant_map"] = restaurant_map
@@ -2336,19 +2309,19 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
                 return SELECT_RESTAURANT
 
-            # ✅ المستخدم كتب اسم مطعم مفقود
+            # ✅ المستخدم كتب اسم مطعم غير موجود
             missing_restaurant_name = text
             missing_restaurant_channel = "@Lamtozkar"
 
-            # استرجاع معرفي المدينة والمحافظة
+            # 🧠 جلب المدينة والمحافظة لعرضها في التقرير
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT city_id, province_id FROM user_data WHERE user_id = %s", (user_id,))
                 row = await cursor.fetchone()
-            city_name = "غير معروفة"
-            province_name = "غير معروفة"
+
+            city_name = province_name = "غير معروفة"
             if row:
                 city_id, province_id = row
-                context.user_data["city_id"] = city_id  # ✅ أيضًا تخزين هنا
+
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT name FROM cities WHERE id = %s", (city_id,))
                     city_row = await cursor.fetchone()
@@ -2368,7 +2341,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                         f"📢 زبون جديد اقترح إضافة مطعم:\n\n"
                         f"🏪 اسم المطعم: {missing_restaurant_name}\n"
                         f"🌍 المدينة: {city_name}\n"
-                        f"📍 المحافظة: {province_name}\n\n"
+                        f"📍 المحافظة: {province_name}\n"
                         f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
                     )
                 )
@@ -2377,9 +2350,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 logger.error(f"❌ خطأ أثناء إرسال اسم المطعم إلى القناة: {e}")
                 await update.message.reply_text("❌ حدث خطأ أثناء إرسال اسم المطعم. يرجى المحاولة لاحقاً.")
 
-            # ✅ إعادة عرض المطاعم بنفس المنطق
-            city_id = context.user_data.get("city_id")  # 🔄 إعادة استخدام المعرف
-
+            # ✅ بعد إرسال المطعم، نعيد عرض المطاعم كالسابق
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                 rows = await cursor.fetchall()
@@ -2387,20 +2358,18 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
             restaurants = []
             restaurant_map = {}
 
-            for restaurant_id, name, is_frozen in rows:
+            for rest_id, name, is_frozen in rows:
                 if is_frozen:
                     continue
+
                 async with conn.cursor() as cursor:
-                    await cursor.execute(
-                        "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
-                        (restaurant_id,)
-                    )
+                    await cursor.execute("SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s", (rest_id,))
                     rating_data = await cursor.fetchone()
 
                 avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
                 label = f"{name} ⭐ ({avg})"
                 restaurants.append(label)
-                restaurant_map[label] = {"id": restaurant_id, "name": name}
+                restaurant_map[name] = {"id": rest_id, "name": name}
 
             restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕"]
             context.user_data["restaurant_map"] = restaurant_map
@@ -2411,9 +2380,8 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 
     except Exception as e:
         logger.exception(f"❌ خطأ في handle_missing_restaurant: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطاعم. حاول مجددًا لاحقًا.")
+        await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطاعم. حاول مجددًا لاحقاً.")
         return SELECT_RESTAURANT
-
 
 
 
