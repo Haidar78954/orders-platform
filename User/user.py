@@ -1661,7 +1661,37 @@ async def verify_code_edit(update: Update, context: CallbackContext) -> int:
         return EDIT_PHONE_VERIFY
 
 async def ask_location_edit(update: Update, context: CallbackContext) -> int:
-    return await ask_location(update, context)  # يعيد نفس الدالة، لكن في الوضعية الصحيحة
+    # إعادة استخدام منطق الموقع
+    return EDIT_LOCATION
+
+async def handle_location_edit(update: Update, context: CallbackContext) -> int:
+    if update.message.location:
+        lat = update.message.location.latitude
+        lon = update.message.location.longitude
+        context.user_data['location_coords'] = {'latitude': lat, 'longitude': lon}
+        return await ask_area_name(update, context)
+    else:
+        await update.message.reply_text("❌ هذا ليس موقعًا حقيقيًا. حاول مرة أخرى.")
+        return EDIT_LOCATION
+
+async def ask_location_edit_entry(update: Update, context: CallbackContext) -> int:
+    # عرض خيارات إرسال الموقع مع زر "عودة"
+    reply_markup = ReplyKeyboardMarkup([
+        [KeyboardButton("📍 إرسال موقعي", request_location=True)],
+        ["عودة ⬅️"]
+    ], resize_keyboard=True)
+
+    inline_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+    ])
+
+    await update.message.reply_text("اختار إرسال موقعي إذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
+    await asyncio.sleep(2)
+    await update.message.reply_text("👇 إذا مو واضح فيك تشوف شرح سريع:", reply_markup=inline_markup)
+
+    return EDIT_LOCATION
+
+
 
 
 
@@ -4826,7 +4856,7 @@ async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 
-ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, EDIT_NAME, EDIT_PHONE, EDIT_PHONE_VERIFY, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_REPORT_REASON, ASK_AREA_NAME,  EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION, ASK_RATING_COMMENT, ASK_RATING, RATING_COMMENT     = range(33)
+ASK_INFO, ASK_NAME, ASK_PHONE, ASK_PHONE_VERIFICATION, ASK_PROVINCE, ASK_CITY, ASK_LOCATION_IMAGE, CONFIRM_INFO, EDIT_NAME, EDIT_PHONE, EDIT_PHONE_VERIFY, EDIT_LOCATION, MAIN_MENU, ORDER_CATEGORY, ORDER_MEAL, CONFIRM_ORDER, SELECT_RESTAURANT, ASK_ORDER_LOCATION, CONFIRM_FINAL_ORDER, ASK_NEW_LOCATION_IMAGE, ASK_NEW_LOCATION_TEXT, CANCEL_ORDER_OPTIONS, ASK_CUSTOM_CITY, ASK_NEW_RESTAURANT_NAME, ASK_ORDER_NOTES, ASK_REPORT_REASON, ASK_AREA_NAME,  EDIT_FIELD_CHOICE, ASK_NEW_AREA_NAME, ASK_DETAILED_LOCATION, ASK_NEW_DETAILED_LOCATION, ASK_RATING_COMMENT, ASK_RATING, RATING_COMMENT     = range(34)
 
 
 
@@ -4888,12 +4918,12 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation)
         ],
         EDIT_FIELD_CHOICE: [
-    MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
-    MessageHandler(filters.Regex("^📱 رقم الهاتف$"), handle_edit_field_choice),
-    MessageHandler(filters.Regex("^📍 الموقع$"), handle_edit_field_choice),
-    MessageHandler(filters.Regex("^عودة ⬅️$"), handle_edit_field_choice),
-    MessageHandler(filters.TEXT, handle_edit_field_choice)
-],
+            MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
+            MessageHandler(filters.Regex("^📱 رقم الهاتف$"), handle_edit_field_choice),
+            MessageHandler(filters.Regex("^📍 الموقع$"), handle_edit_field_choice),
+            MessageHandler(filters.Regex("^عودة ⬅️$"), main_menu),
+            MessageHandler(filters.TEXT, handle_edit_field_choice)
+        ],
         EDIT_NAME: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name_edit)
         ],
@@ -4902,6 +4932,10 @@ conv_handler = ConversationHandler(
         ],
         EDIT_PHONE_VERIFY: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, verify_code_edit)
+        ],
+        EDIT_LOCATION: [
+            MessageHandler(filters.LOCATION, handle_location_edit),
+            MessageHandler(filters.Regex("عودة ⬅️"), ask_edit_choice)
         ],
         SELECT_RESTAURANT: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_restaurant_selection)
