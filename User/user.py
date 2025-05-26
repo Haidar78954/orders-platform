@@ -1897,7 +1897,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                 await update.message.reply_text("❌ جميع المطاعم في مدينتك مجمدة حالياً.")
                 return MAIN_MENU
 
-            restaurants += ["مطعمي المفضل وينو ؟ 😕 😕", "القائمة الرئيسية 🪧"]
+            restaurants += ["مطعمي المفضل وينو ؟ 😕", "القائمة الرئيسية 🪧"]
             context.user_data['restaurant_map'] = restaurant_map
 
             keyboard_buttons = [KeyboardButton(name) for name in restaurants]
@@ -2025,8 +2025,6 @@ async def handle_faq_back(update: Update, context: CallbackContext) -> None:
 
 
 
-
-
 async def handle_restaurant_selection(update: Update, context: CallbackContext) -> int:
     selected_option = update.message.text
     restaurant_map = context.user_data.get('restaurant_map', {})
@@ -2050,8 +2048,14 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
         await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
         return MAIN_MENU
 
-    # ✅ التحقق من المطعم المختار
+    # ✅ المطابقة المرنة
     restaurant_data = restaurant_map.get(selected_option)
+    if not restaurant_data:
+        for label, data in restaurant_map.items():
+            if selected_option.strip() in label:
+                restaurant_data = data
+                break
+
     if not restaurant_data:
         await update.message.reply_text("❌ المطعم الذي اخترته غير موجود. يرجى اختيار مطعم آخر.")
         return SELECT_RESTAURANT
@@ -2065,7 +2069,6 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
                 # تحقق من حالة التجميد
                 await cursor.execute("SELECT is_frozen FROM restaurants WHERE id = %s", (restaurant_id,))
                 result = await cursor.fetchone()
-
                 if not result:
                     await update.message.reply_text("❌ حدث خطأ في جلب حالة المطعم. يرجى المحاولة لاحقًا.")
                     return SELECT_RESTAURANT
@@ -2080,7 +2083,6 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
                 # تحقق من التوقيت
                 await cursor.execute("SELECT open_hour, close_hour FROM restaurants WHERE id = %s", (restaurant_id,))
                 result = await cursor.fetchone()
-
                 if result:
                     open_hour, close_hour = result
                     is_open = await check_restaurant_availability(restaurant_id)
@@ -2122,6 +2124,7 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
         logger.error(f"❌ Database error in handle_restaurant_selection: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطعم. يرجى المحاولة لاحقًا.")
         return SELECT_RESTAURANT
+
 
 
 
@@ -2329,7 +2332,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                     restaurants.append(display_name)
                     restaurant_map[display_name] = name
 
-                restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕 😕"]
+                restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕"]
                 context.user_data["restaurant_map"] = restaurant_map
 
                 reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
@@ -2395,7 +2398,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 restaurants.append(display_name)
                 restaurant_map[display_name] = name
 
-            restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕 😕"]
+            restaurants += ["القائمة الرئيسية 🪧", "مطعمي المفضل وينو ؟ 😕"]
             context.user_data["restaurant_map"] = restaurant_map
 
             reply_markup = ReplyKeyboardMarkup([[r] for r in restaurants], resize_keyboard=True)
