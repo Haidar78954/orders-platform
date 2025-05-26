@@ -360,20 +360,13 @@ db_pool = DBConnectionPool()
 
 @asynccontextmanager
 async def get_db_connection():
-    async with db_lock:  # استخدام قفل التزامن
-        async with db_pool.connection() as conn:
-            try:
-                yield conn
-            except Exception as e:
-                logger.error(f"خطأ في الاتصال بقاعدة البيانات: {e}")
-                # محاولة إعادة الاتصال
-                await asyncio.sleep(0.5)
-                try:
-                    new_conn = await db_pool.get_connection()
-                    yield new_conn
-                except Exception as e2:
-                    logger.error(f"فشل إعادة الاتصال بقاعدة البيانات: {e2}")
-                    raise
+    async with db_lock:
+        conn = await db_pool.get_connection()
+        try:
+            yield conn
+        finally:
+            await db_pool.release_connection(conn)
+
 
 async def get_user_lock(user_id):
     """الحصول على قفل خاص بمستخدم معين"""
@@ -2347,7 +2340,6 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
 
-    # التحقق من طلب العودة للقائمة الرئيسية
     if category_name == "القائمة الرئيسية 🪧":
         reply_markup = ReplyKeyboardMarkup([
             ["اطلب عالسريع 🔥"],
@@ -2357,7 +2349,6 @@ async def process_category_selection(update: Update, context: CallbackContext) -
         await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
         return MAIN_MENU
 
-    # التحقق من وجود بيانات المطعم المحدد
     selected_restaurant_id = context.user_data.get('selected_restaurant_id')
     selected_restaurant_name = context.user_data.get('selected_restaurant_name')
     category_map = context.user_data.get("category_map", {})
@@ -2365,97 +2356,60 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     logger.info(f"🍽️ المطعم المحدد: id={selected_restaurant_id}, name={selected_restaurant_name}")
     logger.info(f"🗂️ category_map: {category_map}")
 
-    # التحقق من وجود المطعم المحدد
     if not selected_restaurant_id or not selected_restaurant_name:
         await update.message.reply_text("❌ لم يتم تحديد المطعم. يرجى اختيار مطعم أولاً.")
         return SELECT_RESTAURANT
 
-    # التحقق من وجود الفئة المحددة
     category_id = category_map.get(category_name)
     logger.info(f"🆔 category_id المختار: {category_id} للفئة: {category_name}")
     
     if not category_id:
         await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
-        # مهم: نعود إلى نفس الحالة ORDER_CATEGORY بدلاً من الانتقال لحالة أخرى
         return ORDER_CATEGORY
 
-    # تخزين بيانات الفئة المحددة
     context.user_data['selected_category_id'] = category_id
     context.user_data['selected_category_name'] = category_name
 
-    # حذف رسائل الوجبات السابقة إن وجدت (مع معالجة أفضل للأخطاء)
     previous_meal_msgs = context.user_data.get("current_meal_messages", [])
     for msg_id in previous_meal_msgs:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
         except Exception as e:
-            # تسجيل الخطأ فقط دون التأثير على تدفق البرنامج
             logger.warning(f"⚠️ فشل حذف رسالة وجبة قديمة msg_id={msg_id}: {e}")
-    
-    # إعادة تهيئة قائمة رسائل الوجبات
     context.user_data["current_meal_messages"] = []
 
-    # إضافة رسالة انتظار للمستخدم
     wait_message = await update.message.reply_text("جاري تحميل الوجبات، يرجى الانتظار...")
-    
+
     try:
-        # استخدام try-finally لضمان تنظيف الموارد بشكل صحيح
-        conn = None
-        cursor = None
         meals = []
-        
-        try:
-            # استخدام اتصال مباشر بدلاً من context manager لتجنب مشاكل التزامن
-            conn = await aiomysql.connect(
-                host=DB_HOST,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                db=DB_NAME,
-                port=DB_PORT,
-                charset='utf8mb4',
-                autocommit=False
-            )
-            cursor = await conn.cursor()
-            
-            # التحقق من وجود الفئة في قاعدة البيانات
-            await cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
-            category_exists = await cursor.fetchone()
-            
-            if not category_exists:
-                logger.error(f"❌ الفئة غير موجودة في قاعدة البيانات: category_id={category_id}")
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
-                await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
-                return ORDER_CATEGORY
-            
-            # جلب الوجبات - مهم: استخدام أسماء الأعمدة الصحيحة
-            query = """
-            SELECT id, name, price, caption, image_file_id, size_options 
-            FROM meals 
-            WHERE category_id = %s
-            """
-            await cursor.execute(query, (category_id,))
-            meals = await cursor.fetchall()
-            logger.info(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
-            
-        finally:
-            # إغلاق الاتصال بشكل صريح
-            if cursor:
-                await cursor.close()
-            if conn:
-                await conn.close()
-        
-        # حذف رسالة الانتظار
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
+                category_exists = await cursor.fetchone()
+
+                if not category_exists:
+                    logger.error(f"❌ الفئة غير موجودة في قاعدة البيانات: category_id={category_id}")
+                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
+                    await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
+                    return ORDER_CATEGORY
+
+                await cursor.execute("""
+                    SELECT id, name, price, caption, image_file_id, size_options 
+                    FROM meals 
+                    WHERE category_id = %s
+                """, (category_id,))
+                meals = await cursor.fetchall()
+                logger.info(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
+
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
         except Exception as e:
             logger.warning(f"⚠️ فشل حذف رسالة الانتظار: {e}")
-        
-        # التحقق من وجود وجبات في الفئة
+
         if not meals:
             await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
             return ORDER_CATEGORY
-        
-        # عرض الوجبات - مهم: ترتيب الحقول يجب أن يتطابق مع الاستعلام
+
         for meal_id, name, price, caption, image_file_id, size_options_json in meals:
             try:
                 size_options = json.loads(size_options_json or "[]")
@@ -2463,8 +2417,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             except json.JSONDecodeError as e:
                 logger.error(f"❌ خطأ في تحليل size_options_json للوجبة {name}: {e}")
                 size_options = []
-            
-            # إعداد أزرار الوجبة
+
             buttons = []
             if size_options:
                 size_buttons = [
@@ -2483,14 +2436,11 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                     InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default"),
                     InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
                 ])
-            
-            # عرض صورة ووصف الوجبة - مهم: التعامل مع image_file_id بدلاً من image_message_id
+
             try:
-                # التحقق من وجود صورة قبل محاولة إرسالها
                 if image_file_id and image_file_id.strip():
                     logger.info(f"📷 محاولة إرسال الصورة file_id={image_file_id}")
                     try:
-                        # استخدام send_photo مباشرة مع file_id بدلاً من copy_message
                         photo_msg = await context.bot.send_photo(
                             chat_id=update.effective_chat.id,
                             photo=image_file_id,
@@ -2499,61 +2449,51 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                         context.user_data["current_meal_messages"].append(photo_msg.message_id)
                     except Exception as img_error:
                         logger.error(f"❌ فشل إرسال صورة الوجبة: {img_error}")
-                        # نستمر في العرض حتى لو فشلت الصورة
-                
-                # عرض تفاصيل الوجبة
+
                 text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
                 if price:
                     text += f"\n💰 السعر: {price} ل.س"
-                    
+
                 details_msg = await update.message.reply_text(
                     text,
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
                 context.user_data["current_meal_messages"].append(details_msg.message_id)
-            
+
             except Exception as e:
-                logger.exception(f"❌ فشل عرض صورة أو تفاصيل وجبة '{name}' (meal_id={meal_id}): {e}")
-                # محاولة عرض النص فقط في حالة فشل عرض الصورة
+                logger.exception(f"❌ فشل عرض وجبة '{name}' (meal_id={meal_id}): {e}")
                 text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
                 if price:
                     text += f"\n💰 السعر: {price} ل.س"
-                    
                 try:
                     msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
                     context.user_data["current_meal_messages"].append(msg.message_id)
                 except Exception as text_error:
-                    logger.error(f"❌ فشل حتى في عرض نص الوجبة: {text_error}")
-        
-        # إعادة عرض الفئات للاختيار مرة أخرى
+                    logger.error(f"❌ فشل عرض النص فقط: {text_error}")
+
         categories = list(category_map.keys()) + ["تم ✅"]
         reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
         await update.message.reply_text(
             "اذا حاطط ببالك مشروب كمان أو أي شي، فيك تختار من القائمة أسفل الشاشة 👇 وبس تخلص اضغط تم 👌",
             reply_markup=reply_markup
         )
-        
-        # مهم: نعود إلى ORDER_CATEGORY بدلاً من ORDER_MEAL للحفاظ على تدفق المحادثة
+
         return ORDER_CATEGORY
-    
+
     except Exception as e:
-        # تسجيل تفاصيل الخطأ بشكل كامل
         import traceback
         error_details = traceback.format_exc()
         logger.error(f"❌ خطأ في process_category_selection: {e}\n{error_details}")
-        
-        # محاولة حذف رسالة الانتظار إذا كانت لا تزال موجودة
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
         except:
             pass
-        
-        # إرسال رسالة خطأ أكثر تفصيلاً للمستخدم
         await update.message.reply_text(
             f"❌ حدث خطأ أثناء تحميل الوجبات: {str(e)[:50]}...\n"
             "سيتم تسجيل هذا الخطأ للمراجعة. يرجى المحاولة لاحقاً."
         )
         return ORDER_CATEGORY
+
 
 
 
