@@ -2415,13 +2415,17 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
         # إذا وصلنا إلى هنا، فهناك وجبات للعرض
         # استدعاء دالة عرض الوجبات
-        return await show_meals_in_category(update, context)
+        await show_meals_in_category(update, context)
+        
+        # مهم جداً: نعيد ORDER_CATEGORY وليس ORDER_MEAL للحفاظ على تدفق المحادثة الصحيح
+        return ORDER_CATEGORY
 
     except Exception as e:
         # تسجيل الخطأ بشكل مفصل
         logger.error(f"❌ خطأ في process_category_selection: {e}", exc_info=True)
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
         return ORDER_CATEGORY
+
 
 
 
@@ -2631,7 +2635,7 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
     if not category_id:
         logger.error("❌ لم يتم تحديد الفئة في show_meals_in_category")
         await update.message.reply_text("❌ حدث خطأ: لم يتم تحديد الفئة.")
-        return ORDER_CATEGORY
+        return
 
     try:
         async with get_db_connection() as conn:
@@ -2649,7 +2653,7 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
         if not meals:
             logger.warning(f"⚠️ لا توجد وجبات في الفئة category_id={category_id}")
             await update.message.reply_text("❌ لا توجد وجبات في هذه الفئة.")
-            return ORDER_CATEGORY
+            return
 
         # تتبع رسائل الوجبات لحذفها لاحقاً
         meal_messages = []
@@ -2724,13 +2728,11 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
 
         # حفظ معرفات الرسائل لحذفها لاحقاً
         context.user_data["current_meal_messages"] = meal_messages
-        
-        return ORDER_MEAL
 
     except Exception as e:
         logger.error(f"❌ خطأ في show_meals_in_category: {e}", exc_info=True)
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
-        return ORDER_CATEGORY
+
 
 
 
