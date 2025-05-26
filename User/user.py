@@ -2345,6 +2345,7 @@ async def handle_order_category(update: Update, context: CallbackContext) -> int
 
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
+    logger.debug(f"📥 اختار المستخدم الفئة: {category_name}")
 
     if category_name == "القائمة الرئيسية 🪧":
         reply_markup = ReplyKeyboardMarkup([
@@ -2359,38 +2360,42 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     selected_restaurant_name = context.user_data.get('selected_restaurant_name')
     category_map = context.user_data.get("category_map", {})
 
+    logger.debug(f"🍽️ المطعم المحدد: id={selected_restaurant_id}, name={selected_restaurant_name}")
+    logger.debug(f"🗂️ category_map: {category_map}")
+
     if not selected_restaurant_id or not selected_restaurant_name:
         await update.message.reply_text("❌ لم يتم تحديد المطعم. يرجى اختيار مطعم أولاً.")
         return SELECT_RESTAURANT
 
     category_id = category_map.get(category_name)
+    logger.debug(f"🆔 category_id المختار: {category_id}")
+    
     if not category_id:
         await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
         return ORDER_CATEGORY
 
-    # تخزين الفئة المختارة
     context.user_data['selected_category_id'] = category_id
     context.user_data['selected_category_name'] = category_name
 
-    # 🧹 حذف رسائل الوجبات السابقة
     previous_meal_msgs = context.user_data.get("current_meal_messages", [])
     for msg_id in previous_meal_msgs:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"⚠️ فشل حذف رسالة وجبة قديمة msg_id={msg_id}: {e}")
     context.user_data["current_meal_messages"] = []
 
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # جلب الوجبات المرتبطة بـ category_id
+                logger.debug(f"🔍 محاولة جلب الوجبات المرتبطة بالفئة category_id={category_id}")
                 await cursor.execute("""
                     SELECT id, name, caption, image_message_id, size_options
                     FROM meals
                     WHERE category_id = %s
                 """, (category_id,))
                 meals = await cursor.fetchall()
+                logger.debug(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
 
                 if not meals:
                     await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
@@ -2401,6 +2406,8 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                         size_options = json.loads(size_options_json or "[]")
                     except json.JSONDecodeError:
                         size_options = []
+
+                    logger.debug(f"🍔 معالجة وجبة: {name} (id={meal_id}), image_id={image_message_id}, sizes={size_options}")
 
                     buttons = []
                     if size_options:
@@ -2423,6 +2430,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
                     try:
                         if image_message_id:
+                            logger.debug(f"📷 محاولة نسخ الصورة message_id={image_message_id} من ADMIN_MEDIA_CHANNEL")
                             photo_msg = await context.bot.copy_message(
                                 chat_id=update.effective_chat.id,
                                 from_chat_id=ADMIN_MEDIA_CHANNEL,
@@ -2430,21 +2438,20 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                             )
                             context.user_data["current_meal_messages"].append(photo_msg.message_id)
 
-                            text = f"🍽️ {name}\n\n{caption}" if caption else name
-                            details_msg = await update.message.reply_text(
-                                text,
-                                reply_markup=InlineKeyboardMarkup(buttons)
-                            )
-                            context.user_data["current_meal_messages"].append(details_msg.message_id)
-                        else:
-                            raise ValueError("image_message_id مفقود.")
+                        text = f"🍽️ {name}\n\n{caption}" if caption else name
+                        details_msg = await update.message.reply_text(
+                            text,
+                            reply_markup=InlineKeyboardMarkup(buttons)
+                        )
+                        context.user_data["current_meal_messages"].append(details_msg.message_id)
+
                     except Exception as e:
-                        logger.error(f"❌ فشل عرض صورة الوجبة '{name}': {e}")
+                        logger.exception(f"❌ فشل عرض صورة أو تفاصيل وجبة '{name}' (meal_id={meal_id}): {e}")
                         text = f"🍽️ {name}\n\n{caption}" if caption else name
                         msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
                         context.user_data["current_meal_messages"].append(msg.message_id)
 
-                # إعادة عرض الفئات
+                # إعادة عرض الفئات للاختيار مرة أخرى
                 categories = list(category_map.keys()) + ["تم ✅"]
                 reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
                 await update.message.reply_text(
@@ -2454,9 +2461,10 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                 return ORDER_MEAL
 
     except Exception as e:
-        logger.error(f"Database error in process_category_selection: {e}")
+        logger.exception(f"❌ Database error in process_category_selection: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
         return ORDER_CATEGORY
+
 
 
 
