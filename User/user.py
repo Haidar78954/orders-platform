@@ -4931,7 +4931,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^لا بدي عدل 😐$"), ask_edit_choice),
             MessageHandler(filters.Regex("^تعديل معلوماتي 🖊$"), ask_edit_choice),
             MessageHandler(filters.Regex("أسئلة متكررة ❓"), handle_faq_entry),
-            MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), ),
+            MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), main_menu),
             MessageHandler(filters.Regex("^من نحن 🏢$"), main_menu),
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), request_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
