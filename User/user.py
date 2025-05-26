@@ -4921,7 +4921,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
             MessageHandler(filters.Regex("^📱 رقم الهاتف$"), handle_edit_field_choice),
             MessageHandler(filters.Regex("^📍 الموقع$"), handle_edit_field_choice),
-            MessageHandler(filters.Regex("^عودة ⬅️$"), main_menu),
+            MessageHandler(filters.Regex("^عودة ⬅️$"), confirm_info),
             MessageHandler(filters.TEXT, handle_edit_field_choice)
         ],
         EDIT_NAME: [
