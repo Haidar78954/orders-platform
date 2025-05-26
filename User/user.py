@@ -2029,28 +2029,17 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
     selected_option = update.message.text
     restaurant_map = context.user_data.get('restaurant_map', {})
 
-    # ✅ لم يذكر مطعمي
     if selected_option == "مطعمي المفضل وينو ؟ 😕":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
-        await update.message.reply_text(
-            "شو اسم مطعم رح نحكيه عالسريع ! 🔥",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text("شو اسم مطعم رح نحكيه عالسريع ! 🔥", reply_markup=reply_markup)
         return ASK_NEW_RESTAURANT_NAME
 
-    # ✅ العودة للقائمة
     if selected_option == "القائمة الرئيسية 🪧":
-        reply_markup = ReplyKeyboardMarkup([
-            ["اطلب عالسريع 🔥"],
-            ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-            ["من نحن 🏢", "أسئلة متكررة ❓"]
-        ], resize_keyboard=True)
-        await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
-        return MAIN_MENU
+        return await main_menu(update, context)
 
-    # ✅ المطابقة المرنة
     restaurant_data = restaurant_map.get(selected_option)
     if not restaurant_data:
+        # مطابقة مرنة
         for label, data in restaurant_map.items():
             if selected_option.strip() in label:
                 restaurant_data = data
@@ -2066,64 +2055,29 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # تحقق من حالة التجميد
                 await cursor.execute("SELECT is_frozen FROM restaurants WHERE id = %s", (restaurant_id,))
                 result = await cursor.fetchone()
                 if not result:
-                    await update.message.reply_text("❌ حدث خطأ في جلب حالة المطعم. يرجى المحاولة لاحقًا.")
+                    await update.message.reply_text("❌ لم يتم العثور على حالة المطعم.")
                     return SELECT_RESTAURANT
 
                 is_frozen = result[0]
                 if is_frozen:
-                    await update.message.reply_text(
-                        f"❌ عذرًا، المطعم {restaurant_name} خارج الخدمة حاليًا بسبب التوقف المؤقت.\n🔄 يرجى اختيار مطعم آخر."
-                    )
+                    await update.message.reply_text(f"❌ المطعم {restaurant_name} خارج الخدمة مؤقتاً.")
                     return SELECT_RESTAURANT
 
-                # تحقق من التوقيت
-                await cursor.execute("SELECT open_hour, close_hour FROM restaurants WHERE id = %s", (restaurant_id,))
-                result = await cursor.fetchone()
-                if result:
-                    open_hour, close_hour = result
-                    is_open = await check_restaurant_availability(restaurant_id)
-                    if not is_open:
-                        def format_hour_12(hour_float):
-                            import math
-                            hour = int(hour_float)
-                            minutes = int(round((hour_float - hour) * 60))
-                            suffix = "صباحًا" if hour < 12 else "مساءً" if hour >= 18 else "ظهرًا"
-                            hour_12 = hour % 12 or 12
-                            time_str = f"{hour_12}:{minutes:02d}" if minutes else f"{hour_12}"
-                            return f"{time_str} {suffix}"
+        # ✅ تخزين المطعم والمتابعة
+        context.user_data["selected_restaurant_id"] = restaurant_id
+        context.user_data["selected_restaurant_name"] = restaurant_name
 
-                        open_str = format_hour_12(open_hour)
-                        close_str = format_hour_12(close_hour)
-
-                        await update.message.reply_text(
-                            f"❌ منعتذر، {restaurant_name} مسكر حاليًا.\n"
-                            f"⏰ أوقات الدوام: من {open_str} إلى {close_str}\n🔙 اختر مطعماً آخر أو حاول مرة أخرى لاحقاً."
-                        )
-                        return SELECT_RESTAURANT
-
-                # ✅ تخزين بيانات المطعم
-                context.user_data['selected_restaurant_id'] = restaurant_id
-                context.user_data['selected_restaurant_name'] = restaurant_name
-
-                # ✅ جلب الفئات
-                await cursor.execute("SELECT name FROM categories WHERE restaurant_id = %s ORDER BY name", (restaurant_id,))
-                rows = await cursor.fetchall()
-
-                categories = [row[0] for row in rows]
-                categories.append("القائمة الرئيسية 🪧")
-
-                reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
-                await update.message.reply_text(f"🔽 اختر الفئة من مطعم {restaurant_name}:", reply_markup=reply_markup)
-                return ORDER_CATEGORY
+        await show_restaurant_categories(update, context)  # ← تعرض الفئات
+        return ORDER_CATEGORY  # ← تحدد المرحلة القادمة
 
     except Exception as e:
-        logger.error(f"❌ Database error in handle_restaurant_selection: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطعم. يرجى المحاولة لاحقًا.")
+        logger.exception(f"❌ خطأ في handle_restaurant_selection: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء معالجة المطعم. حاول مرة أخرى.")
         return SELECT_RESTAURANT
+
 
 
 
