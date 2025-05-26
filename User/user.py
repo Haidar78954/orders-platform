@@ -2290,7 +2290,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
     try:
         async with get_db_connection() as conn:
             if text == "عودة ➡️":
-                # ✅ استرجاع city_id من user_data
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
                     row = await cursor.fetchone()
@@ -2298,8 +2297,8 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                     await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى تسجيل بياناتك أولاً.")
                     return await start(update, context)
                 city_id = row[0]
+                context.user_data["city_id"] = city_id  # ✅ تخزين معرف المدينة
 
-                # ✅ جلب اسم المدينة من جدول cities
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT name FROM cities WHERE id = %s", (city_id,))
                     row = await cursor.fetchone()
@@ -2308,7 +2307,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                     return await start(update, context)
                 city_name = row[0]
 
-                # ✅ جلب المطاعم ضمن المدينة
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                     rows = await cursor.fetchall()
@@ -2338,7 +2336,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 await update.message.reply_text("🔙 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
                 return SELECT_RESTAURANT
 
-            # ✅ المستخدم كتب اسم مطعم غير موجود
+            # ✅ المستخدم كتب اسم مطعم مفقود
             missing_restaurant_name = text
             missing_restaurant_channel = "@Lamtozkar"
 
@@ -2350,6 +2348,7 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
             province_name = "غير معروفة"
             if row:
                 city_id, province_id = row
+                context.user_data["city_id"] = city_id  # ✅ أيضًا تخزين هنا
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT name FROM cities WHERE id = %s", (city_id,))
                     city_row = await cursor.fetchone()
@@ -2378,7 +2377,9 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
                 logger.error(f"❌ خطأ أثناء إرسال اسم المطعم إلى القناة: {e}")
                 await update.message.reply_text("❌ حدث خطأ أثناء إرسال اسم المطعم. يرجى المحاولة لاحقاً.")
 
-            # ✅ إعادة عرض المطاعم بنفس المنطق أعلاه
+            # ✅ إعادة عرض المطاعم بنفس المنطق
+            city_id = context.user_data.get("city_id")  # 🔄 إعادة استخدام المعرف
+
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                 rows = await cursor.fetchall()
@@ -2412,7 +2413,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
         logger.exception(f"❌ خطأ في handle_missing_restaurant: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء جلب بيانات المطاعم. حاول مجددًا لاحقًا.")
         return SELECT_RESTAURANT
-
 
 
 
