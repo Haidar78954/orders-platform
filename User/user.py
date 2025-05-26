@@ -1758,46 +1758,29 @@ PACKAGES = [
 
 
 
-
-
 async def main_menu(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
 
+    # 🧹 حذف أي رسائل تفاعلية سابقة (من نحن، الدعم، FAQ...)
+    for key in ["support_sticker_id", "support_msg_id", "about_us_msg_id", "faq_msg_id", "faq_answer_msg_id"]:
+        msg_id = context.user_data.pop(key, None)
+        if msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
+            except:
+                pass
+
     # ✅ إرسال بكج إذا مر وقت طويل بدون طلب
     await maybe_send_package(update, context)
-
-    # ✅ حذف ستيكر الدعم إن وجد
-    support_sticker_id = context.user_data.pop("support_sticker_id", None)
-    if support_sticker_id:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=support_sticker_id)
-        except:
-            pass
-
-    # ✅ حذف رسالة "من نحن" إن وجدت
-    about_msg_id = context.user_data.pop("about_us_msg_id", None)
-    if about_msg_id:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=about_msg_id)
-        except:
-            pass
 
     if choice == "تعديل معلوماتي 🖊":
         return await ask_edit_choice(update, context)
 
     elif choice == "التواصل مع الدعم 🎧":
-        support_msg_id = context.user_data.get("support_msg_id")
-        if support_msg_id:
-            try:
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=support_msg_id)
-            except:
-                pass
-
         support_button = InlineKeyboardMarkup([[
             InlineKeyboardButton("راسلنا على التلغرام 💬", url="https://t.me/Fast54522")
         ]])
-
         sent = await send_message_with_retry(
             bot=context.bot,
             chat_id=update.effective_chat.id,
@@ -1807,30 +1790,31 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                  "💬 أو تواصل معنا مباشرة عبر تلغرام من الزر أدناه 👇",
             reply_markup=support_button
         )
-
         sticker_msg = await context.bot.send_sticker(
             chat_id=update.effective_chat.id,
             sticker="CAACAgIAAxkBAAEBxvxoM2NN7whnEdE4ppLdFIao_3FjewACvAwAAocoMEntN5GZWCFoBDYE"
         )
         context.user_data["support_sticker_id"] = sticker_msg.message_id
         context.user_data["support_msg_id"] = sent.message_id
-
         return MAIN_MENU
 
     elif choice == "من نحن 🏢":
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📘 فيسبوك", url="https://facebook.com/yourpage"),
-             InlineKeyboardButton("📸 انستغرام", url="https://instagram.com/youraccount")],
-            [InlineKeyboardButton("📢 قناتنا على تلغرام", url="https://t.me/yourchannel")]
-        ])
-
-        sent = await update.message.reply_text(
-            "✅ بوتنا مرخص قانونياً لدى الدولة ويهدف إلى تحسين تجربة الطلبات.\n"
-            "👨‍💻 لدينا فريق عمل جاهز للاستماع لنصائحكم دائماً لنتطور ونحسن لكم الخدمة.\n"
-            "📲 تواصل معنا عبر المنصات التالية 👇",
-            reply_markup=buttons
-        )
-        context.user_data["about_us_msg_id"] = sent.message_id
+        try:
+            buttons = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📘 فيسبوك", url="https://facebook.com/yourpage"),
+                 InlineKeyboardButton("📸 انستغرام", url="https://instagram.com/youraccount")],
+                [InlineKeyboardButton("📢 قناتنا على تلغرام", url="https://t.me/yourchannel")]
+            ])
+            sent = await update.message.reply_text(
+                "✅ بوتنا مرخص قانونياً لدى الدولة ويهدف إلى تحسين تجربة الطلبات.\n"
+                "👨‍💻 لدينا فريق عمل جاهز للاستماع لنصائحكم دائماً لنتطور ونحسن لكم الخدمة.\n"
+                "📲 تواصل معنا عبر المنصات التالية 👇",
+                reply_markup=buttons
+            )
+            context.user_data["about_us_msg_id"] = sent.message_id
+        except Exception as e:
+            logger.error(f"❌ فشل إرسال رسالة من نحن: {e}")
+            await update.message.reply_text("❌ لم نتمكن من عرض معلومات 'من نحن' حالياً. حاول لاحقاً.")
         return MAIN_MENU
 
     elif choice == "أسئلة متكررة ❓":
@@ -1839,7 +1823,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     elif choice == "اطلب عالسريع 🔥":
         now = datetime.now()
         context.user_data["last_fast_order_time"] = now
-        context.user_data["last_order_time"] = now  # ✅ لتتبع آخر نشاط
+        context.user_data["last_order_time"] = now
 
         cancel_times = context.user_data.get("cancel_history", [])
         cooldown, reason_msg = get_fast_order_cooldown(cancel_times)
@@ -1866,6 +1850,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
                         return await start(update, context)
+
                     phone = result[0]
 
                     await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
@@ -1878,44 +1863,51 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                     if not row:
                         await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى التسجيل أولاً.")
                         return await start(update, context)
-                    city_id = row[0]
 
+                    city_id = row[0]
                     await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                     rows = await cursor.fetchall()
 
-                restaurants = []
-                restaurant_map = {}
-                highlight_name = context.user_data.get("go_ad_restaurant_name")
+            if not rows:
+                await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
+                return MAIN_MENU
 
-                for restaurant_id, name, is_frozen in rows:
-                    if is_frozen:
-                        continue
+            restaurants = []
+            restaurant_map = {}
+            highlight_name = context.user_data.get("go_ad_restaurant_name")
 
-                    async with conn.cursor() as cursor:
-                        await cursor.execute(
-                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
-                            (restaurant_id,)
-                        )
-                        rating_data = await cursor.fetchone()
+            for restaurant_id, name, is_frozen in rows:
+                if is_frozen:
+                    continue
 
-                    average = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
-                    display_name = f"{name} ⭐ ({average})"
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
+                        (restaurant_id,)
+                    )
+                    rating_data = await cursor.fetchone()
 
-                    if highlight_name and highlight_name in name:
-                        display_name = f"🔥 {display_name}"
+                avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
+                label = f"{name} ⭐ ({avg})"
+                if highlight_name and highlight_name in name:
+                    label = f"🔥 {label}"
 
-                    restaurants.append(display_name)
-                    restaurant_map[display_name] = {"id": restaurant_id, "name": name}
+                restaurants.append(label)
+                restaurant_map[label] = {"id": restaurant_id, "name": name}
 
-                restaurants += ["مطعمي المفضل وينو ؟ 😕 😕", "القائمة الرئيسية 🪧"]
-                context.user_data['restaurant_map'] = restaurant_map
+            if not restaurants:
+                await update.message.reply_text("❌ جميع المطاعم في مدينتك مجمدة حالياً.")
+                return MAIN_MENU
 
-                keyboard_buttons = [KeyboardButton(name) for name in restaurants]
-                keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
-                reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
+            restaurants += ["مطعمي المفضل وينو ؟ 😕 😕", "القائمة الرئيسية 🪧"]
+            context.user_data['restaurant_map'] = restaurant_map
 
-                await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
-                return SELECT_RESTAURANT
+            keyboard_buttons = [KeyboardButton(name) for name in restaurants]
+            keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
+            reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
+
+            await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
+            return SELECT_RESTAURANT
 
         except Exception as e:
             logger.error(f"Database error in fast order: {e}")
@@ -1925,6 +1917,23 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return MAIN_MENU
+
+
+
+async def clear_main_menu_context(update: Update, context: CallbackContext):
+    for key in [
+        "support_sticker_id", "support_msg_id",
+        "about_us_msg_id", "faq_msg_id", "faq_answer_msg_id"
+    ]:
+        msg_id = context.user_data.pop(key, None)
+        if msg_id:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=msg_id
+                )
+            except:
+                pass
 
 
 
@@ -4922,7 +4931,8 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("^لا بدي عدل 😐$"), ask_edit_choice),
             MessageHandler(filters.Regex("^تعديل معلوماتي 🖊$"), ask_edit_choice),
             MessageHandler(filters.Regex("أسئلة متكررة ❓"), handle_faq_entry),
-            MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), main_menu),
+            MessageHandler(filters.Regex("التواصل مع الدعم 🎧"), ),
+            MessageHandler(filters.Regex("^من نحن 🏢$"), main_menu),
             MessageHandler(filters.Regex("وصل طلبي شكرا لكم 🙏"), request_rating),
             MessageHandler(filters.Regex("إلغاء الطلب بسبب مشكلة 🫢"), handle_order_issue),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
@@ -4930,7 +4940,8 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("ذكرلي المطعم بطلبي 🙋"), handle_reminder),
             MessageHandler(filters.Regex("تذكير المطعم بطلبي 👋"), handle_reminder_order_request),
             MessageHandler(filters.Regex("كم يتبقى لطلبي"), ask_remaining_time),
-            MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation)
+            MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu)
         ],
         EDIT_FIELD_CHOICE: [
             MessageHandler(filters.Regex("^✏️ الاسم$"), handle_edit_field_choice),
