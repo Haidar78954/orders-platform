@@ -1224,15 +1224,23 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
 
 
 async def handle_custom_city(update: Update, context: CallbackContext) -> int:
-    if update.message.text == "عودة ➡️":
+    text = update.message.text.strip()
+
+    # ✅ التعامل مع خيار العودة
+    if text == "عودة ➡️":
         try:
-            province = context.user_data.get('province_name', '')
+            province = context.user_data.get('province_name')
+            if not province:
+                await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها من جديد.")
+                return ASK_PROVINCE
+
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province,))
                     result = await cursor.fetchone()
+
                     if not result:
-                        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها من جديد.")
                         return ASK_PROVINCE
 
                     province_id = result[0]
@@ -1250,32 +1258,41 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقاً.")
             return ASK_CITY
 
-    # باقي الكود بعد التأكد أن المستخدم لم يضغط على "عودة"
-    city_name = update.message.text.strip()
-    province = context.user_data.get('province_name', '')
+    # ✅ إرسال المدينة المقترحة إلى قناة الدعم
+    province = context.user_data.get('province_name')
+    if not province:
+        await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها من جديد.")
+        return ASK_PROVINCE
 
     custom_city_channel = "@Lamtozkar"
 
-    await context.bot.send_message(
-        chat_id=custom_city_channel,
-        text=f"📢 مدينة جديدة تم اقتراحها من أحد المستخدمين:\n\n"
-             f"🌍 المحافظة: {province}\n"
-             f"🏙️ المدينة: {city_name}\n"
-             f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=custom_city_channel,
+            text=f"📢 مدينة جديدة تم اقتراحها من أحد المستخدمين:\n\n"
+                 f"🌍 المحافظة: {province}\n"
+                 f"🏙️ المدينة: {text}\n"
+                 f"👤 المستخدم: @{update.effective_user.username or 'غير متوفر'}"
+        )
+    except Exception as e:
+        logger.error(f"❌ فشل في إرسال المدينة المقترحة إلى القناة: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى لاحقاً.")
+        return ASK_CITY
 
     await update.message.reply_text(
         "✅ تم استلام مدينتك! نأمل أن نتمكن من خدمتك قريبًا 🙏.\n"
         "يرجى اختيار المدينة من القائمة:"
     )
 
+    # ✅ إعادة المستخدم لاختيار المدينة من القائمة
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT id FROM provinces WHERE name = %s", (province,))
                 result = await cursor.fetchone()
+
                 if not result:
-                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها مجددًا.")
+                    await update.message.reply_text("⚠️ لم يتم العثور على المحافظة. يرجى اختيارها من جديد.")
                     return ASK_PROVINCE
 
                 province_id = result[0]
@@ -1292,6 +1309,7 @@ async def handle_custom_city(update: Update, context: CallbackContext) -> int:
         logger.error(f"Database error in handle_custom_city (إعادة): {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل المدن. حاول لاحقاً.")
         return ASK_CITY
+
 
 
 
@@ -1622,7 +1640,12 @@ async def send_verification_code_edit(update: Update, context: CallbackContext) 
     code = random.randint(10000, 99999)
     context.user_data["verification_code"] = code
 
-    await update.message.reply_text(f"🔐 كود التحقق هو: {code}")
+    await send_message_with_retry(
+        bot=context.bot,
+        chat_id="@verifycode12345",  # ← القناة الحقيقية
+        text=f"عزيزي المستخدم، رقمك الجديد هو {phone} والكود هو: {code} 🤗"
+    )
+
     reply_markup = ReplyKeyboardMarkup([["عودة ⬅️"]], resize_keyboard=True)
     await update.message.reply_text("شو الكود يلي وصلك؟", reply_markup=reply_markup)
     return EDIT_PHONE_VERIFY
@@ -1638,8 +1661,8 @@ async def verify_code_edit(update: Update, context: CallbackContext) -> int:
         return EDIT_PHONE_VERIFY
 
 async def ask_location_edit(update: Update, context: CallbackContext) -> int:
-    # إعادة استخدام نفس منطق الموقع مع دعم العودة داخل ask_location نفسه
-    return await ask_location(update, context)
+    return await ask_location(update, context)  # يعيد نفس الدالة، لكن في الوضعية الصحيحة
+
 
 
 
@@ -4833,8 +4856,10 @@ conv_handler = ConversationHandler(
         ASK_CUSTOM_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_city)],
         ASK_LOCATION_IMAGE: [
             MessageHandler(filters.LOCATION, handle_location),
-            MessageHandler(filters.Regex("عودة ➡️"), ask_location)
+            MessageHandler(filters.Regex("عودة ➡️"), ask_location),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_location)  # ← لمنع تجاهل الضغط النصي على "📍 إرسال موقعي"
         ],
+
         ASK_AREA_NAME: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_area_name),
             MessageHandler(filters.Regex("عودة ➡️"), ask_location)
