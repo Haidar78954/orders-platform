@@ -362,10 +362,13 @@ db_pool = DBConnectionPool()
 async def get_db_connection():
     async with db_lock:
         conn = await db_pool.get_connection()
+        if conn is None:
+            raise Exception("❌ فشل الحصول على اتصال بقاعدة البيانات.")
         try:
             yield conn
         finally:
             await db_pool.release_connection(conn)
+
 
 
 async def get_user_lock(user_id):
@@ -2382,24 +2385,38 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
     try:
         meals = []
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
-                category_exists = await cursor.fetchone()
 
-                if not category_exists:
-                    logger.error(f"❌ الفئة غير موجودة في قاعدة البيانات: category_id={category_id}")
-                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
-                    await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
+        # حماية إضافية لضمان أن الاتصال ليس None
+        try:
+            async with get_db_connection() as conn:
+                if not conn:
+                    logger.error("❌ لم يتم الحصول على اتصال صالح بقاعدة البيانات.")
+                    await update.message.reply_text("❌ مشكلة في الاتصال. حاول لاحقاً.")
                     return ORDER_CATEGORY
 
-                await cursor.execute("""
-                    SELECT id, name, price, caption, image_file_id, size_options 
-                    FROM meals 
-                    WHERE category_id = %s
-                """, (category_id,))
-                meals = await cursor.fetchall()
-                logger.info(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
+                    category_exists = await cursor.fetchone()
+
+                    if not category_exists:
+                        logger.error(f"❌ الفئة غير موجودة في قاعدة البيانات: category_id={category_id}")
+                        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
+                        await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
+                        return ORDER_CATEGORY
+
+                    await cursor.execute("""
+                        SELECT id, name, price, caption, image_file_id, size_options 
+                        FROM meals 
+                        WHERE category_id = %s
+                    """, (category_id,))
+                    meals = await cursor.fetchall()
+                    logger.info(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
+
+        except Exception as conn_error:
+            logger.exception(f"❌ فشل الاتصال أو التنفيذ في قاعدة البيانات: {conn_error}")
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
+            await update.message.reply_text("❌ فشل الاتصال بقاعدة البيانات. يرجى المحاولة لاحقاً.")
+            return ORDER_CATEGORY
 
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
