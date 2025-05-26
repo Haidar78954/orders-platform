@@ -1355,8 +1355,8 @@ async def explain_location_instruction(update: Update, context: CallbackContext)
 
     try:
         # إعدادات القناة وصورة التعليم
-        MEDIA_CHANNEL_ID = -1001234567890  # ⬅️ غيّر هذا إلى ID القناة السري
-        IMAGE_MESSAGE_ID = 42              # ⬅️ غيّر هذا إلى message_id للصورة داخل القناة
+        MEDIA_CHANNEL_ID = -1002537649967  # ⬅️ غيّر هذا إلى ID القناة السري
+        IMAGE_MESSAGE_ID = 2               # ⬅️ غيّر هذا إلى message_id للصورة داخل القناة
 
         await context.bot.copy_message(
             chat_id=query.from_user.id,
@@ -1820,7 +1820,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
     elif choice == "أسئلة متكررة ❓":
         return await handle_faq_entry(update, context)
 
-    elif choice == "اطلب عالسريع 🔥":
+        elif choice == "اطلب عالسريع 🔥":
         now = datetime.now()
         context.user_data["last_fast_order_time"] = now
         context.user_data["last_order_time"] = now
@@ -1868,32 +1868,30 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                     await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
                     rows = await cursor.fetchall()
 
-            if not rows:
-                await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
-                return MAIN_MENU
+                    if not rows:
+                        await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
+                        return MAIN_MENU
 
-            restaurants = []
-            restaurant_map = {}
-            highlight_name = context.user_data.get("go_ad_restaurant_name")
+                    restaurants = []
+                    restaurant_map = {}
+                    highlight_name = context.user_data.get("go_ad_restaurant_name")
 
-            for restaurant_id, name, is_frozen in rows:
-                if is_frozen:
-                    continue
+                    for restaurant_id, name, is_frozen in rows:
+                        if is_frozen:
+                            continue
 
-                async with conn.cursor() as cursor:
-                    await cursor.execute(
-                        "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
-                        (restaurant_id,)
-                    )
-                    rating_data = await cursor.fetchone()
+                        await cursor.execute(
+                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
+                            (restaurant_id,)
+                        )
+                        rating_data = await cursor.fetchone()
+                        avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
+                        label = f"{name} ⭐ ({avg})"
+                        if highlight_name and highlight_name in name:
+                            label = f"🔥 {label}"
 
-                avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
-                label = f"{name} ⭐ ({avg})"
-                if highlight_name and highlight_name in name:
-                    label = f"🔥 {label}"
-
-                restaurants.append(label)
-                restaurant_map[label] = {"id": restaurant_id, "name": name}
+                        restaurants.append(label)
+                        restaurant_map[label] = {"id": restaurant_id, "name": name}
 
             if not restaurants:
                 await update.message.reply_text("❌ جميع المطاعم في مدينتك مجمدة حالياً.")
@@ -1914,9 +1912,6 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("❌ حدث خطأ أثناء معالجة الطلب السريع.")
             return MAIN_MENU
 
-    else:
-        await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
-        return MAIN_MENU
 
 
 
