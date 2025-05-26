@@ -2794,7 +2794,7 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
             if image_file_id:
                 try:
                     # تغيير من image_message_id إلى image_file_id
-                    ADMIN_MEDIA_CHANNEL = -1002537649967  # تأكد من تعريف هذا المتغير
+                    ADMIN_MEDIA_CHANNEL = -1002659459294  # تأكد من تعريف هذا المتغير
                     
                     # استخدام file_id مباشرة إذا كان متاحاً
                     if image_file_id.startswith("AgAC"):
