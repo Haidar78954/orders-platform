@@ -2345,7 +2345,7 @@ async def handle_order_category(update: Update, context: CallbackContext) -> int
 
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
-    logger.debug(f"📥 اختار المستخدم الفئة: {category_name}")
+    logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
 
     # التحقق من طلب العودة للقائمة الرئيسية
     if category_name == "القائمة الرئيسية 🪧":
@@ -2362,8 +2362,8 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     selected_restaurant_name = context.user_data.get('selected_restaurant_name')
     category_map = context.user_data.get("category_map", {})
 
-    logger.debug(f"🍽️ المطعم المحدد: id={selected_restaurant_id}, name={selected_restaurant_name}")
-    logger.debug(f"🗂️ category_map: {category_map}")
+    logger.info(f"🍽️ المطعم المحدد: id={selected_restaurant_id}, name={selected_restaurant_name}")
+    logger.info(f"🗂️ category_map: {category_map}")
 
     # التحقق من وجود المطعم المحدد
     if not selected_restaurant_id or not selected_restaurant_name:
@@ -2372,7 +2372,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
     # التحقق من وجود الفئة المحددة
     category_id = category_map.get(category_name)
-    logger.debug(f"🆔 category_id المختار: {category_id}")
+    logger.info(f"🆔 category_id المختار: {category_id} للفئة: {category_name}")
     
     if not category_id:
         await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
@@ -2396,38 +2396,134 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     context.user_data["current_meal_messages"] = []
 
     try:
+        # إضافة رسالة انتظار للمستخدم
+        wait_message = await update.message.reply_text("جاري تحميل الوجبات، يرجى الانتظار...")
+        
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                logger.debug(f"🔍 محاولة جلب الوجبات المرتبطة بالفئة category_id={category_id}")
+                # تسجيل الاستعلام للتشخيص - مهم: استخدام أسماء الأعمدة الصحيحة كما هي في قاعدة البيانات
+                query = """
+                SELECT id, name, price, caption, image_file_id, size_options 
+                FROM meals 
+                WHERE category_id = %s
+                """
+                logger.info(f"🔍 استعلام قاعدة البيانات: {query} مع category_id={category_id}")
                 
-                # تعديل الاستعلام ليتوافق مع هيكل جدول meals الفعلي
-                # حذف عمود price من الاستعلام إذا لم يكن موجوداً في الجدول
-                await cursor.execute("""
-                    SELECT id, name, caption, image_file_id, size_options
-                    FROM meals
-                    WHERE category_id = %s
-                """, (category_id,))
+                # التحقق من وجود الفئة في قاعدة البيانات
+                await cursor.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
+                category_exists = await cursor.fetchone()
+                if not category_exists:
+                    logger.error(f"❌ الفئة غير موجودة في قاعدة البيانات: category_id={category_id}")
+                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
+                    await update.message.reply_text("❌ لم يتم العثور على الفئة في قاعدة البيانات.")
+                    return ORDER_CATEGORY
                 
+                # جلب الوجبات - مهم: استخدام أسماء الأعمدة الصحيحة
+                await cursor.execute(query, (category_id,))
                 meals = await cursor.fetchall()
-                logger.debug(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
+                logger.info(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
 
-                # التحقق من وجود وجبات
+                # حذف رسالة الانتظار
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=wait_message.message_id)
+
+                # التحقق من وجود وجبات في الفئة
                 if not meals:
-                    logger.warning(f"⚠️ لا توجد وجبات في الفئة category_id={category_id}")
-                    await update.message.reply_text("❌ لا توجد وجبات في هذه الفئة حالياً.")
+                    await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
+                    # مهم: نعود إلى نفس الحالة ORDER_CATEGORY بدلاً من الانتقال لحالة أخرى
                     return ORDER_CATEGORY
 
-        # إذا وصلنا إلى هنا، فهناك وجبات للعرض
-        # استدعاء دالة عرض الوجبات
-        await show_meals_in_category(update, context)
-        
-        # مهم جداً: نعيد ORDER_CATEGORY وليس ORDER_MEAL للحفاظ على تدفق المحادثة الصحيح
-        return ORDER_CATEGORY
+                # عرض الوجبات - مهم: ترتيب الحقول يجب أن يتطابق مع الاستعلام
+                for meal_id, name, price, caption, image_file_id, size_options_json in meals:
+                    try:
+                        size_options = json.loads(size_options_json or "[]")
+                        logger.info(f"🍔 معالجة وجبة: {name} (id={meal_id}), image_id={image_file_id}")
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ خطأ في تحليل size_options_json للوجبة {name}: {e}")
+                        size_options = []
+
+                    # إعداد أزرار الوجبة
+                    buttons = []
+                    if size_options:
+                        size_buttons = [
+                            InlineKeyboardButton(
+                                f"{opt['name']}\n{opt['price']}",
+                                callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
+                            )
+                            for opt in size_options
+                        ]
+                        buttons.append(size_buttons)
+                        buttons.append([
+                            InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
+                        ])
+                    else:
+                        buttons.append([
+                            InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default"),
+                            InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
+                        ])
+
+                    # عرض صورة ووصف الوجبة - مهم: التعامل مع image_file_id بدلاً من image_message_id
+                    try:
+                        # التحقق من وجود صورة قبل محاولة إرسالها
+                        if image_file_id and image_file_id.strip():
+                            logger.info(f"📷 محاولة إرسال الصورة file_id={image_file_id}")
+                            try:
+                                # استخدام send_photo مباشرة مع file_id بدلاً من copy_message
+                                photo_msg = await context.bot.send_photo(
+                                    chat_id=update.effective_chat.id,
+                                    photo=image_file_id,
+                                    caption=f"🍽️ {name}"
+                                )
+                                context.user_data["current_meal_messages"].append(photo_msg.message_id)
+                            except Exception as img_error:
+                                logger.error(f"❌ فشل إرسال صورة الوجبة: {img_error}")
+                                # نستمر في العرض حتى لو فشلت الصورة
+                        
+                        # عرض تفاصيل الوجبة
+                        text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
+                        if price:
+                            text += f"\n💰 السعر: {price} ل.س"
+                            
+                        details_msg = await update.message.reply_text(
+                            text,
+                            reply_markup=InlineKeyboardMarkup(buttons)
+                        )
+                        context.user_data["current_meal_messages"].append(details_msg.message_id)
+
+                    except Exception as e:
+                        logger.exception(f"❌ فشل عرض صورة أو تفاصيل وجبة '{name}' (meal_id={meal_id}): {e}")
+                        # محاولة عرض النص فقط في حالة فشل عرض الصورة
+                        text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
+                        if price:
+                            text += f"\n💰 السعر: {price} ل.س"
+                            
+                        try:
+                            msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+                            context.user_data["current_meal_messages"].append(msg.message_id)
+                        except Exception as text_error:
+                            logger.error(f"❌ فشل حتى في عرض نص الوجبة: {text_error}")
+
+                # إعادة عرض الفئات للاختيار مرة أخرى
+                categories = list(category_map.keys()) + ["تم ✅"]
+                reply_markup = ReplyKeyboardMarkup([[cat] for cat in categories], resize_keyboard=True)
+                await update.message.reply_text(
+                    "اذا حاطط ببالك مشروب كمان أو أي شي، فيك تختار من القائمة أسفل الشاشة 👇 وبس تخلص اضغط تم 👌",
+                    reply_markup=reply_markup
+                )
+                
+                # مهم: نعود إلى ORDER_CATEGORY بدلاً من ORDER_MEAL للحفاظ على تدفق المحادثة
+                return ORDER_CATEGORY
 
     except Exception as e:
-        # تسجيل الخطأ بشكل مفصل
-        logger.error(f"❌ خطأ في process_category_selection: {e}", exc_info=True)
-        await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
+        # تسجيل تفاصيل الخطأ بشكل كامل
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"❌ خطأ في process_category_selection: {e}\n{error_details}")
+        
+        # إرسال رسالة خطأ أكثر تفصيلاً للمستخدم
+        await update.message.reply_text(
+            f"❌ حدث خطأ أثناء تحميل الوجبات: {str(e)[:50]}...\n"
+            "سيتم تسجيل هذا الخطأ للمراجعة. يرجى المحاولة لاحقاً."
+        )
         return ORDER_CATEGORY
 
 
