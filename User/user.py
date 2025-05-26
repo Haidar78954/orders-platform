@@ -1913,6 +1913,8 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text(f"❌ خطأ داخلي:\n{e}")
             return MAIN_MENU
 
+def chunk_buttons(buttons, cols=2):
+    return [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
 
 
 
