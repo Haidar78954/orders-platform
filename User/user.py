@@ -2399,11 +2399,15 @@ async def process_category_selection(update: Update, context: CallbackContext) -
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 logger.debug(f"🔍 محاولة جلب الوجبات المرتبطة بالفئة category_id={category_id}")
+                
+                # تعديل الاستعلام ليتوافق مع هيكل جدول meals الفعلي
+                # حذف عمود price من الاستعلام إذا لم يكن موجوداً في الجدول
                 await cursor.execute("""
-                    SELECT id, name, caption, image_message_id, size_options, price
+                    SELECT id, name, caption, image_file_id, size_options
                     FROM meals
                     WHERE category_id = %s
                 """, (category_id,))
+                
                 meals = await cursor.fetchall()
                 logger.debug(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
 
@@ -2628,7 +2632,6 @@ async def get_meal_names_in_category(category_id: int) -> list:
 
 
 
-
 async def show_meals_in_category(update: Update, context: CallbackContext):
     category_id = context.user_data.get("selected_category_id")
     
@@ -2641,11 +2644,14 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 logger.debug(f"🔍 جلب الوجبات للفئة category_id={category_id}")
+                
+                # تعديل الاستعلام ليتوافق مع هيكل جدول meals الفعلي
                 await cursor.execute("""
-                    SELECT id, name, caption, image_message_id, size_options, price
+                    SELECT id, name, caption, image_file_id, size_options, price
                     FROM meals
                     WHERE category_id = %s
                 """, (category_id,))
+                
                 meals = await cursor.fetchall()
                 
                 logger.debug(f"🍱 تم استرجاع {len(meals)} وجبة")
@@ -2660,11 +2666,16 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
 
         for meal in meals:
             # التحقق من عدد العناصر المسترجعة
-            if len(meal) < 5:
+            if len(meal) < 4:
                 logger.error(f"❌ بيانات الوجبة غير مكتملة: {meal}")
                 continue
                 
-            meal_id, meal_name, caption, image_message_id, size_options_json = meal[:5]
+            # تعديل الترتيب ليتوافق مع الاستعلام الجديد
+            meal_id = meal[0]
+            meal_name = meal[1]
+            caption = meal[2]
+            image_file_id = meal[3]
+            size_options_json = meal[4] if len(meal) > 4 else None
             price = meal[5] if len(meal) > 5 else 0
             
             try:
@@ -2696,15 +2707,30 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
             reply_markup = InlineKeyboardMarkup(buttons)
 
             # إرسال الصورة إذا وجدت
-            if image_message_id:
+            if image_file_id:
                 try:
+                    # تغيير من image_message_id إلى image_file_id
                     ADMIN_MEDIA_CHANNEL = -1002537649967  # تأكد من تعريف هذا المتغير
-                    copied_msg = await context.bot.copy_message(
-                        chat_id=update.effective_chat.id,
-                        from_chat_id=ADMIN_MEDIA_CHANNEL,
-                        message_id=int(image_message_id)
-                    )
-                    meal_messages.append(copied_msg.message_id)
+                    
+                    # استخدام file_id مباشرة إذا كان متاحاً
+                    if image_file_id.startswith("AgAC"):
+                        # إذا كان file_id صالح
+                        photo_msg = await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=image_file_id
+                        )
+                        meal_messages.append(photo_msg.message_id)
+                    else:
+                        # إذا كان message_id
+                        try:
+                            copied_msg = await context.bot.copy_message(
+                                chat_id=update.effective_chat.id,
+                                from_chat_id=ADMIN_MEDIA_CHANNEL,
+                                message_id=int(image_file_id)
+                            )
+                            meal_messages.append(copied_msg.message_id)
+                        except ValueError:
+                            logger.error(f"❌ قيمة image_file_id غير صالحة: {image_file_id}")
                     
                     text_msg = await update.message.reply_text(
                         f"{meal_name}\n\n{caption}" if caption else meal_name,
