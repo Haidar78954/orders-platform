@@ -2347,6 +2347,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     category_name = update.message.text
     logger.debug(f"📥 اختار المستخدم الفئة: {category_name}")
 
+    # التحقق من طلب العودة للقائمة الرئيسية
     if category_name == "القائمة الرئيسية 🪧":
         reply_markup = ReplyKeyboardMarkup([
             ["اطلب عالسريع 🔥"],
@@ -2356,6 +2357,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
         await update.message.reply_text("وهي رجعنا 🙃", reply_markup=reply_markup)
         return MAIN_MENU
 
+    # التحقق من وجود بيانات المطعم المحدد
     selected_restaurant_id = context.user_data.get('selected_restaurant_id')
     selected_restaurant_name = context.user_data.get('selected_restaurant_name')
     category_map = context.user_data.get("category_map", {})
@@ -2363,26 +2365,34 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     logger.debug(f"🍽️ المطعم المحدد: id={selected_restaurant_id}, name={selected_restaurant_name}")
     logger.debug(f"🗂️ category_map: {category_map}")
 
+    # التحقق من وجود المطعم المحدد
     if not selected_restaurant_id or not selected_restaurant_name:
         await update.message.reply_text("❌ لم يتم تحديد المطعم. يرجى اختيار مطعم أولاً.")
         return SELECT_RESTAURANT
 
+    # التحقق من وجود الفئة المحددة
     category_id = category_map.get(category_name)
     logger.debug(f"🆔 category_id المختار: {category_id}")
     
     if not category_id:
         await update.message.reply_text("❌ لم يتم العثور على هذه الفئة.")
+        # مهم: نعود إلى نفس الحالة ORDER_CATEGORY بدلاً من الانتقال لحالة أخرى
         return ORDER_CATEGORY
 
+    # تخزين بيانات الفئة المحددة
     context.user_data['selected_category_id'] = category_id
     context.user_data['selected_category_name'] = category_name
 
+    # حذف رسائل الوجبات السابقة إن وجدت (مع معالجة أفضل للأخطاء)
     previous_meal_msgs = context.user_data.get("current_meal_messages", [])
     for msg_id in previous_meal_msgs:
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
         except Exception as e:
+            # تسجيل الخطأ فقط دون التأثير على تدفق البرنامج
             logger.warning(f"⚠️ فشل حذف رسالة وجبة قديمة msg_id={msg_id}: {e}")
+    
+    # إعادة تهيئة قائمة رسائل الوجبات
     context.user_data["current_meal_messages"] = []
 
     try:
@@ -2397,10 +2407,13 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                 meals = await cursor.fetchall()
                 logger.debug(f"🍱 عدد الوجبات المسترجعة: {len(meals)}")
 
+                # التحقق من وجود وجبات في الفئة
                 if not meals:
                     await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
+                    # مهم: نعود إلى نفس الحالة ORDER_CATEGORY بدلاً من الانتقال لحالة أخرى
                     return ORDER_CATEGORY
 
+                # عرض الوجبات
                 for meal_id, name, caption, image_message_id, size_options_json in meals:
                     try:
                         size_options = json.loads(size_options_json or "[]")
@@ -2409,6 +2422,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
                     logger.debug(f"🍔 معالجة وجبة: {name} (id={meal_id}), image_id={image_message_id}, sizes={size_options}")
 
+                    # إعداد أزرار الوجبة
                     buttons = []
                     if size_options:
                         size_buttons = [
@@ -2428,8 +2442,10 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                             InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
                         ])
 
+                    # عرض صورة ووصف الوجبة
                     try:
-                        if image_message_id:
+                        # التحقق من وجود ADMIN_MEDIA_CHANNEL قبل محاولة نسخ الصورة
+                        if image_message_id and 'ADMIN_MEDIA_CHANNEL' in globals():
                             logger.debug(f"📷 محاولة نسخ الصورة message_id={image_message_id} من ADMIN_MEDIA_CHANNEL")
                             photo_msg = await context.bot.copy_message(
                                 chat_id=update.effective_chat.id,
@@ -2437,7 +2453,10 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                                 message_id=int(image_message_id)
                             )
                             context.user_data["current_meal_messages"].append(photo_msg.message_id)
+                        elif image_message_id:
+                            logger.warning("⚠️ ADMIN_MEDIA_CHANNEL غير معرف، لا يمكن نسخ الصورة")
 
+                        # عرض تفاصيل الوجبة
                         text = f"🍽️ {name}\n\n{caption}" if caption else name
                         details_msg = await update.message.reply_text(
                             text,
@@ -2447,6 +2466,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
                     except Exception as e:
                         logger.exception(f"❌ فشل عرض صورة أو تفاصيل وجبة '{name}' (meal_id={meal_id}): {e}")
+                        # محاولة عرض النص فقط في حالة فشل عرض الصورة
                         text = f"🍽️ {name}\n\n{caption}" if caption else name
                         msg = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
                         context.user_data["current_meal_messages"].append(msg.message_id)
@@ -2458,7 +2478,9 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                     "اذا حاطط ببالك مشروب كمان أو أي شي، فيك تختار من القائمة أسفل الشاشة 👇 وبس تخلص اضغط تم 👌",
                     reply_markup=reply_markup
                 )
-                return ORDER_MEAL
+                
+                # مهم: نعود إلى ORDER_CATEGORY بدلاً من ORDER_MEAL للحفاظ على تدفق المحادثة
+                return ORDER_CATEGORY
 
     except Exception as e:
         logger.exception(f"❌ Database error in process_category_selection: {e}")
