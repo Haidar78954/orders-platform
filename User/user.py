@@ -4852,22 +4852,30 @@ async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
+                # محاولة الحصول على رقم الهاتف الحالي للمستخدم
+                await cursor.execute("SELECT phone FROM user_data WHERE user_id = %s", (user_id,))
+                result = await cursor.fetchone()
+                phone = result[0] if result else None
+
+                # حذف جميع بيانات المستخدم
                 await cursor.execute("DELETE FROM conversation_states WHERE user_id = %s", (user_id,))
                 await cursor.execute("DELETE FROM shopping_carts WHERE user_id = %s", (user_id,))
                 await cursor.execute("DELETE FROM user_data WHERE user_id = %s", (user_id,))
+
+                if phone:
+                    await cursor.execute("DELETE FROM user_data WHERE phone = %s", (phone,))
+
             await conn.commit()
 
-        await update.message.reply_text(
-            "✅ تم إعادة تعيين بياناتك بنجاح!\n"
-            "💡 أرسل الآن `/start` لتبدأ كأنك مستخدم جديد.",
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END  # لا تعيد start() مباشرة
+        await update.message.reply_text("✅ تم مسح بياناتك بالكامل، جاري البدء من جديد 🔄")
+        # إعادة التوجيه إلى start() مباشرة
+        return await start(update, context)
 
     except Exception as e:
-        logger.error(f"خطأ في dev_reset: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء إعادة التعيين.")
+        logger.error(f"❌ خطأ أثناء dev_reset: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء إعادة التعيين. حاول لاحقاً.")
         return ConversationHandler.END
+
 
 
 
