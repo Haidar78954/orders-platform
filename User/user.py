@@ -487,7 +487,7 @@ async def save_cart_to_db(user_id, cart_data):
         return False
 
 
-async def get_cart_from_db(user_id):
+async def (user_id):
     print("📥 دخلنا get_cart_from_db الحقيقي")
     logger.warning("🚨 دخلنا get_cart_from_db")
     logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
@@ -2732,16 +2732,6 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
         await query.message.reply_text("❌ حدث خطأ أثناء عرض الملخص الجديد.")
 
     return ORDER_MEAL
-
-
-
-
-async def add_item_to_cart(user_id: int, item_data: dict):
-    cart = await get_cart_from_db(user_id) or []
-    cart.append(item_data)
-    await save_cart_to_db(user_id, cart)
-    total_price = sum(item["price"] for item in cart)
-    return cart, total_price
 
 
 
