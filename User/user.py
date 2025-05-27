@@ -491,9 +491,8 @@ async def save_cart_to_db(user_id, cart_data):
         return False
 
 async def get_cart_from_db(user_id):
-    print("📥 دخلنا get_cart_from_db الحقيقي")
-    logger.warning("🚨 دخلنا get_cart_from_db")
-    logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
+    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
+    print(f"🧠 [get_cart_from_db] user_id = {user_id}")
 
     try:
         print("🔌 قبل فتح الاتصال بقاعدة البيانات")
@@ -506,15 +505,12 @@ async def get_cart_from_db(user_id):
             await cursor.execute("SELECT 1")
             print("✅ نفذنا استعلام تجريبي")
 
-            print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
-            await cursor.execute(
-                "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
-                (user_id,)
-            )
+            await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
             print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
 
             result = await cursor.fetchone()
             print(f"📤 نتيجة الاستعلام: {result}")
+            logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
 
             if result:
                 cart = json.loads(result[0])
@@ -530,6 +526,7 @@ async def get_cart_from_db(user_id):
         print(f"❌ استثناء داخل get_cart_from_db: {e}")
         logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
+
 
 
 
@@ -578,12 +575,14 @@ async def retry_with_backoff(func, *args, max_retries=5, initial_wait=0.5, **kwa
     raise Exception(f"فشلت جميع المحاولات بعد {max_retries} محاولات. آخر خطأ: {last_exception}")
 
 
-
 async def save_cart_to_db(user_id, cart_data):
-    logger.debug(f"💾 [save_cart_to_db] حفظ السلة للمستخدم {user_id}")
+    logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}")
+    print(f"🧠 [save_cart_to_db] user_id = {user_id}")
+
     try:
         json_data = json.dumps(cart_data, ensure_ascii=False)
-        logger.debug(f"📤 JSON النهائي للحفظ: {json_data}")
+        logger.warning(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
+        print(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
 
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
@@ -594,11 +593,21 @@ async def save_cart_to_db(user_id, cart_data):
             await conn.commit()
 
         logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
+
+        # تحقق من الحفظ مباشرة
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+                check = await cursor.fetchone()
+                logger.warning(f"🔍 تحقق بعد الحفظ: {check}")
+                print(f"🔍 تحقق بعد الحفظ: {check}")
+
         return True
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء حفظ السلة في قاعدة البيانات: {e}", exc_info=True)
         return False
+
 
 
 
@@ -2632,16 +2641,20 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 async def add_item_to_cart(user_id: int, item_data: dict):
+    logger.warning(f"🆔 [add_item_to_cart] user_id = {user_id}")
+    print(f"🆔 [add_item_to_cart] user_id = {user_id}")
+
     print("🧪 دخلنا add_item_to_cart الحقيقي")
-    logger.debug(f"🛒 [add_item_to_cart] بدء التنفيذ للمستخدم {user_id}")
     logger.debug(f"📥 العنصر المضاف: {item_data}")
 
     try:
         cart = await get_cart_from_db(user_id) or []
-        logger.debug(f"📦 السلة الحالية قبل الإضافة: {cart}")
+        logger.warning(f"📦 السلة قبل الإضافة: {cart}")
+        print(f"📦 السلة قبل الإضافة: {cart}")
 
         cart.append(item_data)
-        logger.debug(f"🆕 السلة بعد الإضافة: {cart}")
+        logger.warning(f"🆕 السلة بعد الإضافة: {cart}")
+        print(f"🆕 السلة بعد الإضافة: {cart}")
 
         saved = await save_cart_to_db(user_id, cart)
         if not saved:
@@ -2667,10 +2680,13 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     await query.answer()
 
     user_id = update.effective_user.id
+    logger.warning(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
+    print(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
 
     logger.debug(f"🔄 استرجاع السلة من قاعدة البيانات للمستخدم {user_id}")
     cart = await get_cart_from_db(user_id) or []
-    logger.debug(f"📦 محتوى السلة قبل الحذف: {cart}")
+    logger.warning(f"📦 السلة قبل الحذف: {cart}")
+    print(f"📦 السلة قبل الحذف: {cart}")
 
     if not cart:
         logger.info("⚠️ لا توجد وجبات في السلة حالياً.")
@@ -2686,6 +2702,7 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     total_price = sum(item.get("price", 0) for item in cart)
 
     logger.debug(f"💰 المجموع الجديد بعد الحذف: {total_price}")
+    print(f"🧾 السلة بعد الحذف: {cart}")
     await save_cart_to_db(user_id, cart)
 
     context.user_data['orders'] = cart
@@ -2724,6 +2741,7 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
         await query.message.reply_text("❌ حدث خطأ أثناء عرض الملخص الجديد.")
 
     return ORDER_MEAL
+
 
 
 
