@@ -1,7 +1,6 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import CallbackContext
 from telegram import ReplyKeyboardMarkup, KeyboardButton
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.ext import MessageHandler, filters
@@ -193,6 +192,45 @@ async def add_unique_id_column():
 def generate_unique_id(length=50):
   alphabet = string.ascii_letters + string.digits
   return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+async def ensure_meals_have_price():
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE meals SET price = 0 WHERE price IS NULL")
+        await conn.commit()
+        print("✅ تم تعيين السعر 0 للوجبات التي كانت بدون سعر.")
+
+async def ensure_size_options_not_null():
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE meals SET size_options = '[]' WHERE size_options IS NULL")
+        await conn.commit()
+        print("✅ تم تحويل size_options = NULL إلى '[]'.")
+
+async def ensure_image_message_id():
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("UPDATE meals SET image_message_id = 0 WHERE image_message_id IS NULL")
+        await conn.commit()
+        print("✅ تم تعيين 0 للحقول image_message_id التي كانت NULL.")
+
+async def check_meals_category_integrity():
+    async with get_db_connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                SELECT m.id, m.name 
+                FROM meals m 
+                LEFT JOIN categories c ON m.category_id = c.id
+                WHERE c.id IS NULL
+            """)
+            broken = await cursor.fetchall()
+
+    if broken:
+        print("❌ وجبات مرتبطة بفئات غير موجودة:")
+        for row in broken:
+            print(f"- ID: {row[0]}, Name: {row[1]}")
+    else:
+        print("✅ جميع الوجبات مرتبطة بفئات صحيحة.")
 
 
 async def ensure_is_frozen_column():
