@@ -561,20 +561,20 @@ async def retry_with_backoff(func, *args, max_retries=5, initial_wait=0.5, **kwa
 
 
 async def save_cart_to_db(user_id, cart_data):
-    logger.debug(f"💾 save_cart_to_db → المستخدم: {user_id}, السلة: {cart_data}")
-
+    logger.debug(f"💾 [save_cart_to_db] حفظ السلة للمستخدم {user_id}")
     try:
         json_data = json.dumps(cart_data, ensure_ascii=False)
+        logger.debug(f"📤 JSON النهائي للحفظ: {json_data}")
 
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "REPLACE INTO user_carts (user_id, cart_data) VALUES (%s, %s)",
+                    "REPLACE INTO shopping_carts (user_id, cart_data) VALUES (%s, %s)",
                     (user_id, json_data)
                 )
             await conn.commit()
 
-        logger.info(f"✅ تم حفظ السلة بنجاح للمستخدم {user_id}")
+        logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
         return True
 
     except Exception as e:
@@ -583,25 +583,27 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
-    """استرجاع سلة التسوق من قاعدة البيانات"""
+    logger.debug(f"📥 [get_cart_from_db] استرجاع السلة للمستخدم {user_id}")
+
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "SELECT cart_data FROM user_carts WHERE user_id = %s",
+                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
                     (user_id,)
                 )
                 result = await cursor.fetchone()
 
-        if result:
-            cart = json.loads(result[0])
-            if isinstance(cart, list):
-                return cart
-            else:
-                return []  # fallback لحماية من البيانات القديمة
-        return []
+                if result:
+                    cart = json.loads(result[0])
+                    logger.debug(f"✅ السلة المسترجعة: {cart}")
+                    return cart if isinstance(cart, list) else []
+                else:
+                    logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
+                    return []
+
     except Exception as e:
-        logger.error(f"خطأ في استرجاع السلة: {e}")
+        logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
 
 
@@ -2635,22 +2637,25 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 async def add_item_to_cart(user_id: int, item_data: dict):
-    logger.debug(f"🛒 add_item_to_cart → المستخدم: {user_id}, العنصر: {item_data}")
-
-    cart = await get_cart_from_db(user_id) or []
-    logger.debug(f"📦 السلة الحالية قبل الإضافة: {cart}")
-
-    cart.append(item_data)
+    logger.debug(f"🛒 [add_item_to_cart] بدء التنفيذ للمستخدم {user_id}")
+    logger.debug(f"📥 العنصر المضاف: {item_data}")
 
     try:
-        await save_cart_to_db(user_id, cart)
-        total_price = sum(item.get("price", 0) for item in cart)
-        logger.info(f"✅ تمت إضافة العنصر بنجاح. المجموع الحالي: {total_price}")
-        return cart, total_price
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء حفظ السلة بعد الإضافة: {e}", exc_info=True)
-        return cart, sum(item.get("price", 0) for item in cart)
+        cart = await get_cart_from_db(user_id) or []
+        logger.debug(f"📦 السلة الحالية قبل الإضافة: {cart}")
 
+        cart.append(item_data)
+        logger.debug(f"🆕 السلة بعد الإضافة: {cart}")
+
+        await save_cart_to_db(user_id, cart)
+
+        total_price = sum(item.get("price", 0) for item in cart)
+        logger.info(f"✅ تم حفظ السلة للمستخدم {user_id}، المجموع = {total_price}")
+        return cart, total_price
+
+    except Exception as e:
+        logger.error(f"❌ خطأ داخل add_item_to_cart: {e}", exc_info=True)
+        return [], 0
 
 
 
