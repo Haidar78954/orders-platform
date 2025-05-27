@@ -4906,10 +4906,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-def reset_order_counters():
-    cursor = db_conn.cursor()
-    cursor.execute("UPDATE restaurant_order_counter SET last_order_number = 0")
-    db_conn.commit()
+async def reset_order_counters():
+    logger.info("🔄 بدء تصفير عدادات الطلبات")
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("UPDATE restaurants SET order_counter = 0")
+                await conn.commit()
+                logger.info("✅ تم تصفير العدادات لجميع المطاعم")
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء تصفير العدادات: {e}", exc_info=True)
 
 
 async def dev_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
