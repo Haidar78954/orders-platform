@@ -503,46 +503,26 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
-    print("📥 دخلنا get_cart_from_db الحقيقي")
-    logger.warning("🚨 دخلنا get_cart_from_db")
-    logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
-    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
-
+    logger.debug(f"📥 استرجاع السلة للمستخدم {user_id}")
     try:
-        print("🔌 قبل فتح الاتصال بقاعدة البيانات")
         async with get_db_connection() as conn:
-            print("✅ تم فتح الاتصال")
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
+                    (user_id,)
+                )
+                result = await cursor.fetchone()
+                logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
 
-            print("🧪 قبل تنفيذ conn.cursor()")
-            cursor = await conn.cursor()
-            print("🧪 حصلنا على cursor عادي")
-            await cursor.execute("SELECT 1")
-            print("✅ نفذنا استعلام تجريبي")
-
-            # ✅ تعديل الاستعلام لإجبار MySQL على إرجاع cart_data كسلسلة نصية
-            print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
-            await cursor.execute(
-                "SELECT CAST(cart_data AS CHAR) FROM shopping_carts WHERE user_id = %s",
-                (user_id,)
-            )
-            print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
-
-            result = await cursor.fetchone()
-            print(f"📤 نتيجة الاستعلام: {result}")
-            logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
-
-            if result:
-                cart = json.loads(result[0])
-                print(f"✅ تم تحويل JSON: {cart}")
-                logger.debug(f"✅ تم استرجاع السلة: {cart}")
-                return cart if isinstance(cart, list) else []
-            else:
-                print("ℹ️ لا توجد سلة محفوظة")
-                logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
-                return []
-
+                if result and isinstance(result[0], (str, bytes)):
+                    json_str = result[0].decode() if isinstance(result[0], bytes) else result[0]
+                    cart = json.loads(json_str)
+                    logger.debug(f"✅ تم استرجاع السلة: {cart}")
+                    return cart
+                else:
+                    logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
+                    return []
     except Exception as e:
-        print(f"❌ استثناء داخل get_cart_from_db: {e}")
         logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
 
