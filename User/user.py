@@ -472,27 +472,35 @@ async def send_message_with_rate_limit(chat_id, text, **kwargs):
     return await send_message_with_retry(context.bot, chat_id, text=text, **kwargs)
 
 async def save_cart_to_db(user_id, cart_data):
-    """حفظ سلة التسوق في قاعدة البيانات"""
+    logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}")
     try:
+        json_data = json.dumps(cart_data, ensure_ascii=False)
+        logger.warning(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
+
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # تحويل البيانات إلى JSON
-                json_data = json.dumps(cart_data, ensure_ascii=False)
-
-                # استخدام REPLACE INTO لإضافة أو تحديث البيانات
                 await cursor.execute(
-                    "REPLACE INTO shopping_carts (user_id, cart_data) VALUES (%s, %s)",
+                    """
+                    INSERT INTO shopping_carts (user_id, cart_data)
+                    VALUES (%s, %s)
+                    ON DUPLICATE KEY UPDATE cart_data = VALUES(cart_data)
+                    """,
                     (user_id, json_data)
                 )
             await conn.commit()
+
+        logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
         return True
+
     except Exception as e:
-        logger.error(f"خطأ في حفظ سلة التسوق: {e}")
+        logger.error(f"❌ خطأ أثناء حفظ السلة في قاعدة البيانات: {e}", exc_info=True)
         return False
 
+
 async def get_cart_from_db(user_id):
+    print("📥 دخلنا get_cart_from_db الحقيقي")
+    logger.warning("🚨 دخلنا get_cart_from_db")
     logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
-    print(f"🧠 [get_cart_from_db] user_id = {user_id}")
 
     try:
         print("🔌 قبل فتح الاتصال بقاعدة البيانات")
@@ -505,14 +513,17 @@ async def get_cart_from_db(user_id):
             await cursor.execute("SELECT 1")
             print("✅ نفذنا استعلام تجريبي")
 
-            await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+            await cursor.execute(
+                "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
+                (user_id,)
+            )
             print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
 
             result = await cursor.fetchone()
-            print(f"📤 نتيجة الاستعلام: {result}")
             logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
+            print(f"📤 نتيجة الاستعلام: {result}")
 
-            if result:
+            if result and result[0]:
                 cart = json.loads(result[0])
                 print(f"✅ تم تحويل JSON: {cart}")
                 logger.debug(f"✅ تم استرجاع السلة: {cart}")
@@ -526,6 +537,7 @@ async def get_cart_from_db(user_id):
         print(f"❌ استثناء داخل get_cart_from_db: {e}")
         logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
+
 
 
 
