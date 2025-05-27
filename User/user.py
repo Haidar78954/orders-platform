@@ -35,13 +35,13 @@ from apscheduler.triggers.cron import CronTrigger
 
 
 
+file_handler = logging.FileHandler("errors.log")
+stream_handler = logging.StreamHandler(sys.stdout)
+
 logging.basicConfig(
-    filename='errors.log',
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.ERROR,
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # ✅ تأكيد الإخراج إلى التيرمنال أيضًا
-    ]
+    handlers=[file_handler, stream_handler]
 )
 
 logger = logging.getLogger(__name__)
