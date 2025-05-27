@@ -857,6 +857,7 @@ def create_rating_message(order_id, order_number, rating, comment=None):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message
     user_id = update.effective_user.id
+    logger.info("✅ تم تنفيذ الدالة start بنجاح")
 
     # التحقق من اتساق البيانات عند بدء المحادثة
     await verify_data_consistency(user_id)
