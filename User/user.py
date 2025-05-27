@@ -4834,23 +4834,32 @@ async def handle_delivery_assignment(update: Update, context: CallbackContext):
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    # 🧠 إرسال الخطأ للمشرف في قناة الأخطاء
+    import traceback
+
+    # طباعة كاملة في التيرمنال
+    logger.error("🔥🔥🔥 حدث استثناء!", exc_info=context.error)
+
+    # توليد نص Stack Trace
+    traceback_text = ''.join(traceback.format_exception(None, context.error, context.error.__traceback__))
+
     try:
         await context.bot.send_message(
             chat_id=ERRORS_CHANNEL,
-            text=(
-                "🚨 *حدث خطأ في البوت!*\n"
-                f"🔧 `{context.error}`"
-            ),
+            text=f"🚨 *حدث خطأ في البوت!*\n```{traceback_text}```",
             parse_mode="Markdown"
         )
-    except TelegramError:
-        pass  # إذا فشل إرسال الخطأ، تجاهله بصمت
+    except:
+        pass
 
-    # 🧾 إبلاغ المستخدم برسالة لطيفة
-    if update and getattr(update, "message", None):
+    # إبلاغ المستخدم برسالة مناسبة
+    if getattr(update, "message", None):
         try:
             await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى لاحقاً.")
+        except:
+            pass
+    elif getattr(update, "callback_query", None):
+        try:
+            await update.callback_query.answer("❌ حدث خطأ أثناء معالجة الزر. حاول لاحقاً.", show_alert=True)
         except:
             pass
 
@@ -5095,6 +5104,7 @@ def extract_order_number(text):
 
 def run_user_bot () :
     application = Application.builder().token("8035364090:AAFlQC5slPnNBMnFUxyyZzxS5ltWkWZZ6CM").build()
+    logger.info("🚀 تم تشغيل البوت بنجاح وهو جاهز لاستقبال الأوامر.")
 
     
 
