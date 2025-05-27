@@ -2460,7 +2460,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             reply_markup=reply_markup
         )
 
-        return ORDER_CATEGORY
+        return ORDER_MEAL
 
     except Exception as e:
         import traceback
@@ -2471,7 +2471,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
         except:
             pass
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً.")
-        return return ORDER_MEAL
+        return ORDER_CATEGORY
 
 
 
