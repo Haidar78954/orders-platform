@@ -2347,7 +2347,7 @@ async def handle_order_category(update: Update, context: CallbackContext) -> int
     return await process_category_selection(update, context)
 
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
-    category_name = update.message.text  # ✅ نستخدم النص من ReplyKeyboard
+    category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
 
     if category_name == "القائمة الرئيسية 🪧":
@@ -2427,32 +2427,38 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             buttons.append([
                 InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
             ])
+            reply_markup = InlineKeyboardMarkup(buttons)
+
+            text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
+            if price:
+                text += f"\n💰 السعر: {price} ل.س"
 
             if image_message_id:
                 try:
                     photo_msg = await context.bot.copy_message(
                         chat_id=update.effective_chat.id,
                         from_chat_id=ADMIN_MEDIA_CHANNEL,
-                        message_id=image_message_id
+                        message_id=image_message_id,
+                        reply_markup=reply_markup  # ✅ الزر مع الصورة
                     )
                     context.user_data["current_meal_messages"].append(photo_msg.message_id)
                 except Exception as e:
                     logger.error(f"❌ فشل في نسخ صورة الوجبة '{name}': {e}")
-
-            text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
-            if price:
-                text += f"\n💰 السعر: {price} ل.س"
-
-            try:
-                msg = await context.bot.send_message(  # ✅ الحل هنا
+                    msg = await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=text,
+                        reply_markup=reply_markup
+                    )
+                    context.user_data["current_meal_messages"].append(msg.message_id)
+            else:
+                msg = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=text,
-                    reply_markup=InlineKeyboardMarkup(buttons)
+                    reply_markup=reply_markup
                 )
                 context.user_data["current_meal_messages"].append(msg.message_id)
-            except Exception as e:
-                logger.error(f"❌ فشل عرض نص الوجبة: {e}")
 
+        # قائمة الفئات للعودة
         categories = list(category_map.keys())
         keyboard = [[cat] for cat in categories]
         keyboard.append(["تم ✅", "القائمة الرئيسية 🪧"])
@@ -2464,6 +2470,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             reply_markup=reply_markup
         )
 
+        context.user_data["conversation_state"] = ORDER_MEAL  # ✅ للمتابعة أو التشخيص
         return ORDER_MEAL
 
     except Exception as e:
@@ -2478,6 +2485,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             text="❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً."
         )
         return ORDER_CATEGORY
+
 
 
 
@@ -2502,6 +2510,9 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
+    logger.warning("🔥 تم الضغط على زر إضافة وجبة.")
+    logger.warning(f"📍 context.user_data['conversation_state'] = {context.user_data.get('conversation_state')}")
+
     query = update.callback_query
     await query.answer()
     logger.info(f"⬇️ تم الضغط على الزر: {query.data}")
@@ -2609,6 +2620,9 @@ async def add_item_to_cart(user_id: int, item_data: dict):
 
 
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
+    logger.warning("🔥 تم الضغط على زر حذف آخر وجبة.")
+    logger.warning(f"📍 context.user_data['conversation_state'] = {context.user_data.get('conversation_state')}")
+
     query = update.callback_query
     await query.answer()
 
