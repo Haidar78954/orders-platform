@@ -503,29 +503,27 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
-    logger.debug(f"📥 استرجاع السلة للمستخدم {user_id}")
+    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
-                    (user_id,)
-                )
+                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
                 result = await cursor.fetchone()
                 logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
 
-                if result and isinstance(result[0], (str, bytes)):
-                    json_str = result[0].decode() if isinstance(result[0], bytes) else result[0]
-                    cart = json.loads(json_str)
-                    logger.debug(f"✅ تم استرجاع السلة: {cart}")
+                if result and result[0]:
+                    cart_data = result[0]
+                    if isinstance(cart_data, bytes):
+                        cart_data = cart_data.decode("utf-8")
+                    cart = json.loads(cart_data)
+                    logger.warning(f"✅ تم تحويل JSON: {cart}")
                     return cart
                 else:
                     logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
                     return []
     except Exception as e:
-        logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
+        logger.error(f"❌ خطأ أثناء استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
-
 
 
 
