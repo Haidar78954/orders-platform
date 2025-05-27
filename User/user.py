@@ -504,11 +504,13 @@ async def get_cart_from_db(user_id):
             print("🧪 قبل تنفيذ conn.cursor()")
             async with conn.cursor() as cursor:
                 print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
+
                 await cursor.execute(
                     "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
                     (user_id,)
                 )
                 print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
+
                 result = await cursor.fetchone()
                 print(f"📤 نتيجة الاستعلام: {result}")
 
@@ -516,11 +518,7 @@ async def get_cart_from_db(user_id):
                     cart = json.loads(result[0])
                     print(f"✅ تم تحويل JSON: {cart}")
                     logger.debug(f"✅ تم استرجاع السلة: {cart}")
-                    if isinstance(cart, list):
-                        return cart
-                    else:
-                        logger.warning("⚠️ تنسيق السلة غير متوقع. سيتم إرجاع قائمة فارغة.")
-                        return []
+                    return cart if isinstance(cart, list) else []
                 else:
                     print("ℹ️ لا توجد سلة محفوظة")
                     logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
@@ -530,6 +528,7 @@ async def get_cart_from_db(user_id):
         print(f"❌ استثناء داخل get_cart_from_db: {e}")
         logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
+
 
 
 
