@@ -505,27 +505,30 @@ async def get_cart_from_db(user_id):
             print("✅ تم فتح الاتصال")
 
             print("🧪 قبل تنفيذ conn.cursor()")
-            async with conn.cursor() as cursor:
-                print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
+            cursor = await conn.cursor()
+            print("🧪 حصلنا على cursor عادي")
+            await cursor.execute("SELECT 1")
+            print("✅ نفذنا استعلام تجريبي")
 
-                await cursor.execute(
-                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
-                    (user_id,)
-                )
-                print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
+            print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
+            await cursor.execute(
+                "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
+                (user_id,)
+            )
+            print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
 
-                result = await cursor.fetchone()
-                print(f"📤 نتيجة الاستعلام: {result}")
+            result = await cursor.fetchone()
+            print(f"📤 نتيجة الاستعلام: {result}")
 
-                if result:
-                    cart = json.loads(result[0])
-                    print(f"✅ تم تحويل JSON: {cart}")
-                    logger.debug(f"✅ تم استرجاع السلة: {cart}")
-                    return cart if isinstance(cart, list) else []
-                else:
-                    print("ℹ️ لا توجد سلة محفوظة")
-                    logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
-                    return []
+            if result:
+                cart = json.loads(result[0])
+                print(f"✅ تم تحويل JSON: {cart}")
+                logger.debug(f"✅ تم استرجاع السلة: {cart}")
+                return cart if isinstance(cart, list) else []
+            else:
+                print("ℹ️ لا توجد سلة محفوظة")
+                logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
+                return []
 
     except Exception as e:
         print(f"❌ استثناء داخل get_cart_from_db: {e}")
