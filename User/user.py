@@ -592,31 +592,6 @@ async def save_cart_to_db(user_id, cart_data):
         return False
 
 
-async def get_cart_from_db(user_id):
-    logger.debug(f"📥 [get_cart_from_db] استرجاع السلة للمستخدم {user_id}")
-
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
-                    (user_id,)
-                )
-                result = await cursor.fetchone()
-
-                if result:
-                    cart = json.loads(result[0])
-                    logger.debug(f"✅ السلة المسترجعة: {cart}")
-                    return cart if isinstance(cart, list) else []
-                else:
-                    logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
-                    return []
-
-    except Exception as e:
-        logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
-        return []
-
-
 
 async def delete_cart_from_db(user_id):
     """حذف سلة التسوق من قاعدة البيانات"""
