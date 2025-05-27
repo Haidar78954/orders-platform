@@ -4985,7 +4985,6 @@ conv_handler = ConversationHandler(
             CallbackQueryHandler(handle_done_adding_meals, pattern="^done_adding_meals$"),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
             MessageHandler(filters.Regex("^تم ✅$"), handle_done_adding_meals),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_order_category),
         ],
         ASK_ORDER_NOTES: [
             MessageHandler(filters.Regex("^عودة ➡️$"), handle_order_category),
