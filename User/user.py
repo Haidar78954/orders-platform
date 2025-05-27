@@ -565,7 +565,6 @@ async def save_cart_to_db(user_id, cart_data):
         logger.error(f"خطأ في حفظ السلة: {e}")
         return False
 
-
 async def get_cart_from_db(user_id):
     """استرجاع سلة التسوق من قاعدة البيانات"""
     try:
@@ -578,11 +577,16 @@ async def get_cart_from_db(user_id):
                 result = await cursor.fetchone()
 
         if result:
-            return json.loads(result[0])
-        return {}
+            cart = json.loads(result[0])
+            if isinstance(cart, list):
+                return cart
+            else:
+                return []  # fallback لحماية من البيانات القديمة
+        return []
     except Exception as e:
         logger.error(f"خطأ في استرجاع السلة: {e}")
-        return {}
+        return []
+
 
 
 async def delete_cart_from_db(user_id):
@@ -4967,9 +4971,9 @@ conv_handler = ConversationHandler(
             CallbackQueryHandler(handle_add_meal_with_size, pattern="^add_meal_with_size:"),
             CallbackQueryHandler(handle_remove_last_meal, pattern="^remove_last_meal$"),
             CallbackQueryHandler(handle_done_adding_meals, pattern="^done_adding_meals$"),
+            MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
             MessageHandler(filters.Regex("^تم ✅$"), handle_done_adding_meals),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_order_category),
-            MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu)
         ],
         ASK_ORDER_NOTES: [
             MessageHandler(filters.Regex("^عودة ➡️$"), handle_order_category),
