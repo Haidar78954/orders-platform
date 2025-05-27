@@ -494,7 +494,7 @@ async def get_cart_from_db(user_id):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "SELECT cart_data FROM user_carts WHERE user_id = %s",
+                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
                     (user_id,)
                 )
                 result = await cursor.fetchone()
@@ -2638,8 +2638,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 
-
-
 async def add_item_to_cart(user_id: int, item_data: dict):
     logger.debug(f"🛒 [add_item_to_cart] بدء التنفيذ للمستخدم {user_id}")
     logger.debug(f"📥 العنصر المضاف: {item_data}")
@@ -2651,7 +2649,9 @@ async def add_item_to_cart(user_id: int, item_data: dict):
         cart.append(item_data)
         logger.debug(f"🆕 السلة بعد الإضافة: {cart}")
 
-        await save_cart_to_db(user_id, cart)
+        saved = await save_cart_to_db(user_id, cart)
+        if not saved:
+            logger.warning(f"⚠️ لم يتم حفظ السلة للمستخدم {user_id}")
 
         total_price = sum(item.get("price", 0) for item in cart)
         logger.info(f"✅ تم حفظ السلة للمستخدم {user_id}، المجموع = {total_price}")
@@ -2660,6 +2660,7 @@ async def add_item_to_cart(user_id: int, item_data: dict):
     except Exception as e:
         logger.error(f"❌ خطأ داخل add_item_to_cart: {e}", exc_info=True)
         return [], 0
+
 
 
 
