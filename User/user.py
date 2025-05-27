@@ -2343,6 +2343,8 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 
 
 
+async def handle_order_category(update: Update, context: CallbackContext) -> int:
+    return await process_category_selection(update, context)
 
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text  # ✅ نستخدم النص من ReplyKeyboard
