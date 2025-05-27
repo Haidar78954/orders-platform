@@ -132,38 +132,40 @@ async def update_order_status(order_id, status, bot_type):
 
 
 
-
 def initialize_database():
     conn = pymysql.connect(
         host=DB_HOST,
         user=DB_USER,
         password=DB_PASSWORD,
-        charset='utf8mb4'
+        charset='utf8mb4',
+        autocommit=True
     )
     cursor = conn.cursor()
 
-    # إنشاء قاعدة البيانات إذا لم تكن موجودة
+    # إنشاء قاعدة البيانات وضبط الترميز
     cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
     cursor.execute(f"USE {DB_NAME}")
 
-    # إنشاء الجداول
+    # المحافظات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS provinces (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(255) UNIQUE NOT NULL
-        )
+        ) ENGINE=InnoDB;
     """)
 
+    # المدن
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cities (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             province_id INT NOT NULL,
             ads_channel VARCHAR(255),
-            FOREIGN KEY (province_id) REFERENCES provinces(id)
-        )
+            FOREIGN KEY (province_id) REFERENCES provinces(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # بيانات المستخدمين
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_data (
             user_id BIGINT PRIMARY KEY,
@@ -175,11 +177,12 @@ def initialize_database():
             location_text TEXT,
             latitude DOUBLE,
             longitude DOUBLE,
-            FOREIGN KEY (province_id) REFERENCES provinces(id),
-            FOREIGN KEY (city_id) REFERENCES cities(id)
-        )
+            FOREIGN KEY (province_id) REFERENCES provinces(id) ON DELETE SET NULL,
+            FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB;
     """)
 
+    # المطاعم
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS restaurants (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -189,20 +192,22 @@ def initialize_database():
             open_hour FLOAT NOT NULL,
             close_hour FLOAT NOT NULL,
             is_frozen TINYINT DEFAULT 0,
-            FOREIGN KEY (city_id) REFERENCES cities(id)
-        )
+            FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # الفئات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS categories (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             restaurant_id INT NOT NULL,
             UNIQUE(name, restaurant_id),
-            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
-        )
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # الوجبات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS meals (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -215,18 +220,20 @@ def initialize_database():
             unique_id VARCHAR(255) UNIQUE,
             image_message_id INT,
             UNIQUE(name, category_id),
-            FOREIGN KEY (category_id) REFERENCES categories(id)
-        )
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # عداد الطلبات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS restaurant_order_counter (
             restaurant_id INT PRIMARY KEY,
-            last_order_number INT,
-            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
-        )
+            last_order_number INT DEFAULT 0 NOT NULL,
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # سجل الطلبات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_orders (
             order_id VARCHAR(255) PRIMARY KEY,
@@ -234,12 +241,13 @@ def initialize_database():
             restaurant_id INT NOT NULL,
             city_id INT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES user_data(user_id),
-            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
-            FOREIGN KEY (city_id) REFERENCES cities(id)
-        )
+            FOREIGN KEY (user_id) REFERENCES user_data(user_id) ON DELETE CASCADE,
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+            FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
     """)
 
+    # التقييمات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS restaurant_ratings (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -248,28 +256,31 @@ def initialize_database():
             rating INT DEFAULT 0,
             comment TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id),
-            FOREIGN KEY (user_id) REFERENCES user_data(user_id),
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES user_data(user_id) ON DELETE CASCADE,
             UNIQUE(restaurant_id, user_id)
-        )
+        ) ENGINE=InnoDB;
     """)
 
+    # حالة المحادثة
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS conversation_states (
             user_id BIGINT PRIMARY KEY,
             state_data JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
+        ) ENGINE=InnoDB;
     """)
 
+    # السلة
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS shopping_carts (
             user_id BIGINT PRIMARY KEY,
             cart_data JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
+        ) ENGINE=InnoDB;
     """)
 
+    # سجل الإلغاء
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cancellation_history (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -277,27 +288,25 @@ def initialize_database():
             reason TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX (user_id)
-        )
+        ) ENGINE=InnoDB;
     """)
 
-
+    # الإعلانات
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS advertisements (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            content TEXT NOT NULL,
+            ad_text TEXT NOT NULL,
             city_id INT,
             restaurant_id INT,
-            ad_text TEXT NOT NULL,
             media_file_id VARCHAR(255),
             media_type VARCHAR(50),
             expire_timestamp BIGINT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (city_id) REFERENCES cities(id),
-            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
-        )
+            FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE SET NULL,
+            FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB;
     """)
 
-    conn.commit()
     conn.close()
 
 # تحميل الإعدادات من ملف .env
@@ -480,14 +489,18 @@ async def save_cart_to_db(user_id, cart_data):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    "REPLACE INTO shopping_carts (user_id, cart_data) VALUES (%s, %s)",
+                    """
+                    INSERT INTO shopping_carts (user_id, cart_data)
+                    VALUES (%s, %s) AS new
+                    ON DUPLICATE KEY UPDATE cart_data = new.cart_data
+                    """,
                     (user_id, json_data)
                 )
             await conn.commit()
 
         logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
 
-        # ✅ تحقق من أن السلة تم حفظها فعلاً
+        # ✅ تحقق من الحفظ
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
@@ -499,6 +512,7 @@ async def save_cart_to_db(user_id, cart_data):
     except Exception as e:
         logger.error(f"❌ خطأ أثناء حفظ السلة في قاعدة البيانات: {e}", exc_info=True)
         return False
+
 
 
 
