@@ -2471,7 +2471,8 @@ async def process_category_selection(update: Update, context: CallbackContext) -
         except:
             pass
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً.")
-        return ORDER_CATEGORY
+        return return ORDER_MEAL
+
 
 
 
