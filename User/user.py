@@ -2493,6 +2493,8 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 
 
+
+
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
@@ -2517,17 +2519,8 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     return ORDER_MEAL
 
                 meal_name, base_price, size_options_json = result
+                size_options = json.loads(size_options_json or "[]")
 
-                # تأكيد أن size_options_json ليس None
-                size_options = []
-                if size_options_json:
-                    try:
-                        size_options = json.loads(size_options_json)
-                    except Exception as e:
-                        logger.warning(f"⚠️ فشل في json.loads: {e}")
-                        size_options = []
-
-                # استخراج السعر المناسب
                 price = base_price
                 if size != "default":
                     for opt in size_options:
@@ -2541,30 +2534,31 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     "price": price
                 }
 
+                # ✅ استخدام list[dict] وتخزينها في context
                 orders, total_price = await add_item_to_cart(user_id, item_data)
-                context.user_data['orders'] = orders
-                context.user_data['temporary_total_price'] = total_price
+                context.user_data["orders"] = orders
+                context.user_data["temporary_total_price"] = total_price
 
+                # ✅ إنشاء ملخص من list[dict]
                 summary_counter = defaultdict(int)
                 for item in orders:
-                    label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
+                    label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
                     summary_counter[label] += 1
 
                 summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
                 summary_text = "\n".join(summary_lines)
 
                 text = (
-                    f"✅ تمت إضافة: {meal_name}\n\n"
+                    f"✅ تمت إضافة: {item_data['name']} ({item_data['size']})\n\n"
                     f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
                     f"💰 المجموع: {total_price} ل.س\n"
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
 
-                # حذف الرسالة السابقة إن وجدت
-                summary_msg_id = context.user_data.get("summary_msg_id")
-                if summary_msg_id:
+                msg_id = context.user_data.get("summary_msg_id")
+                if msg_id:
                     try:
-                        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=summary_msg_id)
+                        await context.bot.delete_message(update.effective_chat.id, msg_id)
                     except:
                         pass
 
@@ -2575,10 +2569,12 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 return ORDER_MEAL
 
     except Exception as e:
-        import traceback
-        logger.error(f"❌ استثناء في handle_add_meal_with_size:\n{traceback.format_exc()}")
+        logger.error(f"❌ استثناء في handle_add_meal_with_size: {e}")
         await query.message.reply_text("❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً.")
         return ORDER_MEAL
+
+
+
 
 
 async def add_item_to_cart(user_id: int, item_data: dict):
@@ -2596,45 +2592,34 @@ async def add_item_to_cart(user_id: int, item_data: dict):
 
 
 
-
-
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
 
     user_id = update.effective_user.id
+    cart = await get_cart_from_db(user_id) or []
 
-   
-    cart = await get_cart_from_db(user_id) or {}
-    orders = json.loads(cart.get('orders', '[]'))
-
-    if not orders:
+    if not cart:
         await query.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
         return ORDER_MEAL
 
     # حذف آخر وجبة
-    last_item = orders.pop()
+    last_item = cart.pop()
     last_key = f"{last_item['name']} ({last_item['size']})" if last_item['size'] != "default" else last_item['name']
-    price = last_item.get('price', 0)
+    price = last_item.get("price", 0)
 
     # حساب السعر الإجمالي الجديد
-    total_price = sum(item.get('price', 0) for item in orders)
+    total_price = sum(item.get("price", 0) for item in cart)
 
-  
-    cart_data = {
-        'orders': json.dumps(orders),
-        'total_price': str(total_price),
-        'selected_restaurant': cart.get('selected_restaurant', '')
-    }
-    await save_cart_to_db(user_id, cart_data)
+    await save_cart_to_db(user_id, cart)
 
-    # تحديث context.user_data أيضاً للتوافق مع الكود الحالي
-    context.user_data['orders'] = orders
+    # تحديث context.user_data للتوافق
+    context.user_data['orders'] = cart
     context.user_data['temporary_total_price'] = total_price
 
-    # إعداد ملخص الطلب
+    # ملخص الطلب
     summary_counter = defaultdict(int)
-    for item in orders:
+    for item in cart:
         label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
         summary_counter[label] += 1
 
@@ -2644,45 +2629,34 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     text = (
         f"❌ تم حذف: {last_key} وقيمته {price}\n\n"
         f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
-        f"💰 المجموع: {total_price}\n"
+        f"💰 المجموع: {total_price} ل.س\n"
         f"عندما تنتهي اختر ✅ تم من الأسفل"
     )
 
-    # حذف الرسالة السابقة إن وجدت
+    # حذف ملخص قديم إذا وجد
     summary_msg_id = context.user_data.get("summary_msg_id")
     if summary_msg_id:
         try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=summary_msg_id
-            )
+            await context.bot.delete_message(update.effective_chat.id, summary_msg_id)
         except:
             pass
 
     # إرسال ملخص جديد
     msg = await query.message.reply_text(text)
     context.user_data["summary_msg_id"] = msg.message_id
-
-    
     await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
     return ORDER_MEAL
 
 
 
-async def get_meal_names_in_category(category_id: int) -> list:
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("""
-                    SELECT name FROM meals
-                    WHERE category_id = %s
-                """, (category_id,))
-                rows = await cursor.fetchall()
-        return [row[0] for row in rows]
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء جلب أسماء الوجبات: {e}")
-        return []
+async def add_item_to_cart(user_id: int, item_data: dict):
+    cart = await get_cart_from_db(user_id) or []
+    cart.append(item_data)
+    await save_cart_to_db(user_id, cart)
+    total_price = sum(item["price"] for item in cart)
+    return cart, total_price
+
 
 
 
@@ -2819,8 +2793,6 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
 
 
 
-
-
 async def handle_done_adding_meals(update: Update, context: CallbackContext) -> int:
     orders = context.user_data.get("orders", [])
     if not isinstance(orders, list) or not orders:
@@ -2857,12 +2829,14 @@ async def handle_done_adding_meals(update: Update, context: CallbackContext) -> 
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
+
     await context.bot.send_sticker(
         chat_id=update.effective_chat.id,
         sticker="CAACAgIAAxkBAAEBxv9oM2VLrcxfq5FSQvvYLQ_TfEs1qQACxREAArCasUhdUZ2-kKVX2jYE"
     )
 
     return ASK_ORDER_NOTES
+
 
 
 
