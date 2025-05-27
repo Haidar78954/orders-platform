@@ -17,7 +17,7 @@ from urllib.parse import unquote
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram  Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import NetworkError, TelegramError
 from telegram.ext import (
     Application,
@@ -488,6 +488,7 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
+    print("📥 دخلنا get_cart_from_db الحقيقي")
     logger.warning("🚨 دخلنا get_cart_from_db")
     logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
     try:
@@ -2639,6 +2640,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 async def add_item_to_cart(user_id: int, item_data: dict):
+    print("🧪 دخلنا add_item_to_cart الحقيقي")
     logger.debug(f"🛒 [add_item_to_cart] بدء التنفيذ للمستخدم {user_id}")
     logger.debug(f"📥 العنصر المضاف: {item_data}")
 
