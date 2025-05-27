@@ -505,6 +505,7 @@ async def save_cart_to_db(user_id, cart_data):
 async def get_cart_from_db(user_id):
     print("📥 دخلنا get_cart_from_db الحقيقي")
     logger.warning("🚨 دخلنا get_cart_from_db")
+    logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
     logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
 
     try:
@@ -518,17 +519,19 @@ async def get_cart_from_db(user_id):
             await cursor.execute("SELECT 1")
             print("✅ نفذنا استعلام تجريبي")
 
+            # ✅ تعديل الاستعلام لإجبار MySQL على إرجاع cart_data كسلسلة نصية
+            print("✅ حصلنا على cursor، ننفذ الاستعلام الآن")
             await cursor.execute(
-                "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
+                "SELECT CAST(cart_data AS CHAR) FROM shopping_carts WHERE user_id = %s",
                 (user_id,)
             )
             print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
 
             result = await cursor.fetchone()
-            logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
             print(f"📤 نتيجة الاستعلام: {result}")
+            logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
 
-            if result and result[0]:
+            if result:
                 cart = json.loads(result[0])
                 print(f"✅ تم تحويل JSON: {cart}")
                 logger.debug(f"✅ تم استرجاع السلة: {cart}")
