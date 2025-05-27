@@ -3,6 +3,7 @@ import pymysql
 import asyncio
 import json
 import time
+import sys
 import random
 import re
 import string
@@ -37,7 +38,10 @@ from apscheduler.triggers.cron import CronTrigger
 logging.basicConfig(
     filename='errors.log',
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.ERROR
+    level=logging.ERROR,
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # ✅ تأكيد الإخراج إلى التيرمنال أيضًا
+    ]
 )
 
 logger = logging.getLogger(__name__)
@@ -5104,6 +5108,7 @@ def extract_order_number(text):
 
 def run_user_bot () :
     application = Application.builder().token("8035364090:AAFlQC5slPnNBMnFUxyyZzxS5ltWkWZZ6CM").build()
+    print("✅ logging initialized")
     logger.info("🚀 تم تشغيل البوت بنجاح وهو جاهز لاستقبال الأوامر.")
 
     
