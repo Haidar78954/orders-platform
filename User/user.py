@@ -2586,7 +2586,10 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 logger.info(f"🛒 item_data المحضر للإضافة إلى السلة: {item_data}")
 
+                logger.warning("🚧 سيتم الآن استدعاء add_item_to_cart")
                 orders, total_price = await add_item_to_cart(user_id, item_data)
+                logger.warning("✅ add_item_to_cart تم تنفيذه بنجاح")
+
                 context.user_data["orders"] = orders
                 context.user_data["temporary_total_price"] = total_price
                 logger.debug(f"✅ تمت الإضافة للسلة. إجمالي السعر: {total_price}")
