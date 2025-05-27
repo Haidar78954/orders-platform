@@ -366,22 +366,15 @@ db_pool = DBConnectionPool()
 @asynccontextmanager
 async def get_db_connection():
     print("🌀 دخلنا get_db_connection")
-    async with db_lock:
-        print("🔒 حصلنا على قفل db_lock")
-        conn = await db_pool.get_connection()
-        print(f"🔗 نتيجة get_connection: {conn}")
-        if conn is None:
-            print("❌ فشل في الحصول على الاتصال بقاعدة البيانات")
-            raise Exception("❌ فشل الحصول على اتصال بقاعدة البيانات.")
-        try:
-            print("📤 قبل yield conn")
-            yield conn
-        except Exception as e:
-            print(f"❌ خطأ أثناء yield conn: {e}")
-            raise
-        finally:
-            await db_pool.release_connection(conn)
-            print("🧹 تم تحرير الاتصال")
+    conn = await db_pool.get_connection()
+    print(f"🔗 نتيجة get_connection: {conn}")
+
+    try:
+        yield conn
+    finally:
+        print("🧹 سيتم تحرير الاتصال")
+        await db_pool.release_connection(conn)
+
 
 
 
