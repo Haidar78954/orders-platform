@@ -488,6 +488,7 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
+    logger.warning("🚨 دخلنا get_cart_from_db")
     logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
     try:
         async with get_db_connection() as conn:
