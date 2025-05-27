@@ -491,16 +491,22 @@ async def get_cart_from_db(user_id):
     logger.warning("🚨 دخلنا get_cart_from_db")
     logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
     try:
+        print("🔌 قبل فتح الاتصال بقاعدة البيانات")
         async with get_db_connection() as conn:
+            print("✅ تم فتح الاتصال")
             async with conn.cursor() as cursor:
+                print("🎯 حصلنا على cursor، ننفذ الاستعلام الآن")
                 await cursor.execute(
                     "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
                     (user_id,)
                 )
+                print("📥 تم تنفيذ الاستعلام، ننتظر النتيجة...")
                 result = await cursor.fetchone()
+                print(f"📤 نتيجة الاستعلام: {result}")
 
                 if result:
                     cart = json.loads(result[0])
+                    print(f"✅ تم تحويل JSON: {cart}")
                     logger.debug(f"✅ تم استرجاع السلة: {cart}")
                     if isinstance(cart, list):
                         return cart
@@ -508,11 +514,14 @@ async def get_cart_from_db(user_id):
                         logger.warning("⚠️ تنسيق السلة غير متوقع. سيتم إرجاع قائمة فارغة.")
                         return []
                 else:
+                    print("ℹ️ لا توجد سلة محفوظة")
                     logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
                     return []
     except Exception as e:
+        print(f"❌ استثناء داخل get_cart_from_db: {e}")
         logger.error(f"❌ خطأ في استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
         return []
+
 
 
 
