@@ -2495,6 +2495,7 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
+    logger.warning(f"🔘 تم الضغط على الزر: {query.data}")
     await query.answer()
 
     try:
