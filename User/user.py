@@ -1525,6 +1525,9 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
 
                 await conn.commit()
 
+            # ✅ حفظ حالة المستخدم بعد التسجيل
+            await save_conversation_state(user_id, context.user_data)
+
             reply_markup = ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
                 ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
@@ -1536,14 +1539,13 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
                 reply_markup=reply_markup
             )
     
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.7)
 
-            # 📨 الرسالة الثانية بعد ثانية
             await update.message.reply_text("وأيمت ما بدك فيك تعدل معلوماتك 🌝")
 
             if ads_channel:
-                invite_keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📢 لا تفوّت العروض! انضم لقناتنا", url=f"https://t.me/{ads_channel.lstrip('@'  )}")
+                invite_keyboard = InlineKeyboardMarkup([[ 
+                    InlineKeyboardButton("📢 لا تفوّت العروض! انضم لقناتنا", url=f"https://t.me/{ads_channel.lstrip('@')}")
                 ]])
                 await update.message.reply_text(
                     f"🎉 عروض يومية مخصصة لأهل مدينة {context.user_data['city_name']}!\n"
