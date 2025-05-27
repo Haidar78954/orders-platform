@@ -480,21 +480,26 @@ async def save_cart_to_db(user_id, cart_data):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
-                    """
-                    INSERT INTO shopping_carts (user_id, cart_data)
-                    VALUES (%s, %s)
-                    ON DUPLICATE KEY UPDATE cart_data = VALUES(cart_data)
-                    """,
+                    "REPLACE INTO shopping_carts (user_id, cart_data) VALUES (%s, %s)",
                     (user_id, json_data)
                 )
             await conn.commit()
 
         logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
+
+        # ✅ تحقق من أن السلة تم حفظها فعلاً
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+                confirm = await cursor.fetchone()
+                logger.warning(f"🔍 تحقق بعد الحفظ داخل save_cart_to_db: {confirm}")
+
         return True
 
     except Exception as e:
         logger.error(f"❌ خطأ أثناء حفظ السلة في قاعدة البيانات: {e}", exc_info=True)
         return False
+
 
 
 async def get_cart_from_db(user_id):
@@ -2683,7 +2688,6 @@ async def add_item_to_cart(user_id: int, item_data: dict):
 
 
 
-
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     logger.warning("🔥 تم الضغط على زر حذف آخر وجبة.")
     logger.warning(f"📍 context.user_data['conversation_state'] = {context.user_data.get('conversation_state')}")
@@ -2695,8 +2699,9 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     logger.warning(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
     print(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
 
-    logger.debug(f"🔄 استرجاع السلة من قاعدة البيانات للمستخدم {user_id}")
+    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
     cart = await get_cart_from_db(user_id) or []
+
     logger.warning(f"📦 السلة قبل الحذف: {cart}")
     print(f"📦 السلة قبل الحذف: {cart}")
 
@@ -2710,11 +2715,9 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     price = last_item.get("price", 0)
 
     logger.info(f"🗑️ تم حذف آخر عنصر من السلة: {last_key} بسعر {price}")
-
     total_price = sum(item.get("price", 0) for item in cart)
+    logger.warning(f"💰 المجموع الجديد بعد الحذف: {total_price}")
 
-    logger.debug(f"💰 المجموع الجديد بعد الحذف: {total_price}")
-    print(f"🧾 السلة بعد الحذف: {cart}")
     await save_cart_to_db(user_id, cart)
 
     context.user_data['orders'] = cart
