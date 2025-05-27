@@ -2492,14 +2492,12 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 
 
-
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
-    logger.warning(f"🔘 تم الضغط على الزر: {query.data}")
     await query.answer()
+    logger.info(f"⬇️ تم الضغط على الزر: {query.data}")
 
     try:
-        # ✅ استخراج meal_id واسم الحجم من callback_data
         _, meal_id_str, size = query.data.split(":")
         meal_id = int(meal_id_str)
         user_id = update.effective_user.id
@@ -2519,18 +2517,22 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 meal_name, base_price, size_options_json = result
 
-                # ✅ حساب السعر بناءً على الحجم المختار
-                price = base_price
-                if size != "default" and size_options_json:
+                # تأكيد أن size_options_json ليس None
+                size_options = []
+                if size_options_json:
                     try:
                         size_options = json.loads(size_options_json)
-                        for opt in size_options:
-                            if opt["name"] == size:
-                                price = opt["price"]
-                                break
-                    except Exception as size_err:
-                        logger.error(f"⚠️ خطأ في تحليل size_options للوجبة {meal_name}: {size_err}")
-                        price = base_price
+                    except Exception as e:
+                        logger.warning(f"⚠️ فشل في json.loads: {e}")
+                        size_options = []
+
+                # استخراج السعر المناسب
+                price = base_price
+                if size != "default":
+                    for opt in size_options:
+                        if opt.get("name") == size:
+                            price = opt.get("price", base_price)
+                            break
 
                 item_data = {
                     "name": meal_name,
@@ -2539,7 +2541,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 }
 
                 orders, total_price = await add_item_to_cart(user_id, item_data)
-
                 context.user_data['orders'] = orders
                 context.user_data['temporary_total_price'] = total_price
 
@@ -2554,10 +2555,11 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 text = (
                     f"✅ تمت إضافة: {meal_name}\n\n"
                     f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
-                    f"💰 المجموع: {total_price}\n"
+                    f"💰 المجموع: {total_price} ل.س\n"
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
 
+                # حذف الرسالة السابقة إن وجدت
                 summary_msg_id = context.user_data.get("summary_msg_id")
                 if summary_msg_id:
                     try:
