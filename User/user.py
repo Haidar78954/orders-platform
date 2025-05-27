@@ -486,8 +486,7 @@ async def save_cart_to_db(user_id, cart_data):
         logger.error(f"خطأ في حفظ سلة التسوق: {e}")
         return False
 
-
-async def (user_id):
+async def get_cart_from_db(user_id):
     print("📥 دخلنا get_cart_from_db الحقيقي")
     logger.warning("🚨 دخلنا get_cart_from_db")
     logger.debug(f"📥 get_cart_from_db → استرجاع السلة للمستخدم {user_id}")
