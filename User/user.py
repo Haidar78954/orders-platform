@@ -17,7 +17,7 @@ from urllib.parse import unquote
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from telegram  Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import NetworkError, TelegramError
 from telegram.ext import (
     Application,
