@@ -2581,6 +2581,19 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
         return ORDER_MEAL
 
 
+async def add_item_to_cart(user_id: int, item_data: dict):
+    """
+    إضافة عنصر إلى السلة المؤقتة للمستخدم
+    """
+    cart = await get_cart_from_db(user_id) or []
+    cart.append(item_data)
+
+    await save_cart_to_db(user_id, cart)
+
+    total_price = sum(item["price"] for item in cart)
+    return cart, total_price
+
+
 
 
 
