@@ -373,13 +373,16 @@ async def get_db_connection():
         if conn is None:
             print("❌ فشل في الحصول على الاتصال بقاعدة البيانات")
             raise Exception("❌ فشل الحصول على اتصال بقاعدة البيانات.")
-        
-        print("📤 قبل yield conn")  # ✅ أضف هذا الآن
         try:
+            print("📤 قبل yield conn")
             yield conn
+        except Exception as e:
+            print(f"❌ خطأ أثناء yield conn: {e}")
+            raise
         finally:
             await db_pool.release_connection(conn)
             print("🧹 تم تحرير الاتصال")
+
 
 
 
