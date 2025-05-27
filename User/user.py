@@ -2497,16 +2497,14 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
     query = update.callback_query
     await query.answer()
 
-    # ✅ استخراج meal_id واسم الحجم من callback_data
-    _, meal_id_str, size = query.data.split(":")
-    meal_id = int(meal_id_str)
-
-    user_id = update.effective_user.id
-
     try:
+        # ✅ استخراج meal_id واسم الحجم من callback_data
+        _, meal_id_str, size = query.data.split(":")
+        meal_id = int(meal_id_str)
+        user_id = update.effective_user.id
+
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # ✅ جلب معلومات الوجبة باستخدام meal_id
                 await cursor.execute("""
                     SELECT name, price, size_options
                     FROM meals
@@ -2520,7 +2518,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 meal_name, base_price, size_options_json = result
 
-                # حساب السعر بناءً على الحجم المختار
+                # ✅ حساب السعر بناءً على الحجم المختار
                 price = base_price
                 if size != "default" and size_options_json:
                     try:
@@ -2529,7 +2527,8 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                             if opt["name"] == size:
                                 price = opt["price"]
                                 break
-                    except:
+                    except Exception as size_err:
+                        logger.error(f"⚠️ خطأ في تحليل size_options للوجبة {meal_name}: {size_err}")
                         price = base_price
 
                 item_data = {
@@ -2540,11 +2539,9 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 orders, total_price = await add_item_to_cart(user_id, item_data)
 
-                # تخزين في السياق
                 context.user_data['orders'] = orders
                 context.user_data['temporary_total_price'] = total_price
 
-                # إعداد ملخص الطلب
                 summary_counter = defaultdict(int)
                 for item in orders:
                     label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
@@ -2560,7 +2557,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
 
-                # حذف الملخص السابق إن وُجد
                 summary_msg_id = context.user_data.get("summary_msg_id")
                 if summary_msg_id:
                     try:
@@ -2568,18 +2564,18 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     except:
                         pass
 
-                # إرسال ملخص جديد
                 msg = await query.message.reply_text(text)
                 context.user_data["summary_msg_id"] = msg.message_id
-
                 await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
                 return ORDER_MEAL
 
     except Exception as e:
-        logger.error(f"❌ خطأ أثناء إضافة الوجبة: {e}")
+        import traceback
+        logger.error(f"❌ استثناء في handle_add_meal_with_size:\n{traceback.format_exc()}")
         await query.message.reply_text("❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً.")
         return ORDER_MEAL
+
 
 
 
