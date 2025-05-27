@@ -2344,9 +2344,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 
 
 
-async def handle_order_category(update: Update, context: CallbackContext) -> int:
-    return await process_category_selection(update, context)
-
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text  # ✅ نستخدم النص من ReplyKeyboard
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
@@ -2486,6 +2483,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
 
 
+
 # 📸 دالة لاختبار نسخ صورة من القناة
 async def test_copy_image(update: Update, context: CallbackContext):
     try:
@@ -2497,7 +2495,6 @@ async def test_copy_image(update: Update, context: CallbackContext):
         await update.message.reply_text("✅ تم نسخ الصورة بنجاح.")
     except Exception as e:
         await update.message.reply_text(f"❌ فشل نسخ الصورة: {e}")
-
 
 
 
@@ -2522,17 +2519,20 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 result = await cursor.fetchone()
 
                 if not result:
-                    await query.message.reply_text("❌ لم يتم العثور على الوجبة.")
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="❌ لم يتم العثور على الوجبة."
+                    )
                     return ORDER_MEAL
 
                 meal_name, base_price, size_options_json = result
                 size_options = json.loads(size_options_json or "[]")
 
-                price = base_price
+                price = base_price or 0
                 if size != "default":
                     for opt in size_options:
                         if opt.get("name") == size:
-                            price = opt.get("price", base_price)
+                            price = opt.get("price", price)
                             break
 
                 item_data = {
@@ -2541,12 +2541,11 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     "price": price
                 }
 
-                # ✅ استخدام list[dict] وتخزينها في context
+                # ✅ تخزين في cart بصيغة list[dict]
                 orders, total_price = await add_item_to_cart(user_id, item_data)
                 context.user_data["orders"] = orders
                 context.user_data["temporary_total_price"] = total_price
 
-                # ✅ إنشاء ملخص من list[dict]
                 summary_counter = defaultdict(int)
                 for item in orders:
                     label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
@@ -2562,6 +2561,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
 
+                # حذف الملخص السابق إن وجد
                 msg_id = context.user_data.get("summary_msg_id")
                 if msg_id:
                     try:
@@ -2569,16 +2569,23 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     except:
                         pass
 
-                msg = await query.message.reply_text(text)
+                msg = await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=text
+                )
                 context.user_data["summary_msg_id"] = msg.message_id
                 await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
                 return ORDER_MEAL
 
     except Exception as e:
-        logger.error(f"❌ استثناء في handle_add_meal_with_size: {e}")
-        await query.message.reply_text("❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً.")
+        logger.error(f"❌ استثناء في handle_add_meal_with_size: {e}", exc_info=True)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً."
+        )
         return ORDER_MEAL
+
 
 
 
