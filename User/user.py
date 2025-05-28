@@ -481,31 +481,33 @@ async def send_message_with_rate_limit(chat_id, text, **kwargs):
     return await send_message_with_retry(context.bot, chat_id, text=text, **kwargs)
 
 async def save_cart_to_db(user_id, cart_data):
-    logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}")
+    logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}, type = {type(user_id)}")
     try:
+        # تأكد من أن user_id هو integer
+        user_id = int(user_id)
+        
         json_data = json.dumps(cart_data, ensure_ascii=False)
         logger.warning(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
 
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
+                # استخدام INSERT ... ON DUPLICATE KEY UPDATE بدلاً من REPLACE INTO
                 await cursor.execute(
                     """
                     INSERT INTO shopping_carts (user_id, cart_data)
-                    VALUES (%s, %s) AS new
-                    ON DUPLICATE KEY UPDATE cart_data = new.cart_data
+                    VALUES (%s, %s)
+                    ON DUPLICATE KEY UPDATE cart_data = VALUES(cart_data)
                     """,
                     (user_id, json_data)
                 )
             await conn.commit()
 
-        logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
-
-        # ✅ تحقق من الحفظ
+        # تحقق من الحفظ
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
-                confirm = await cursor.fetchone()
-                logger.warning(f"🔍 تحقق بعد الحفظ داخل save_cart_to_db: {confirm}")
+                check = await cursor.fetchone()
+                logger.warning(f"🔍 تحقق بعد الحفظ: {check}")
 
         return True
 
@@ -516,11 +518,18 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 
+
 async def get_cart_from_db(user_id):
-    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
+    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}, type = {type(user_id)}")
     try:
+        # تأكد من أن user_id هو integer
+        user_id = int(user_id)
+        
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
+                # إضافة تأخير صغير للتأكد من اكتمال عملية الحفظ السابقة
+                await asyncio.sleep(0.1)
+                
                 await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
                 result = await cursor.fetchone()
                 logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
@@ -533,7 +542,7 @@ async def get_cart_from_db(user_id):
                     logger.warning(f"✅ تم تحويل JSON: {cart}")
                     return cart
                 else:
-                    logger.info(f"ℹ️ لا توجد سلة محفوظة للمستخدم {user_id}")
+                    logger.warning(f"⚠️ لا توجد سلة محفوظة للمستخدم {user_id} (نوع: {type(user_id)})")
                     return []
     except Exception as e:
         logger.error(f"❌ خطأ أثناء استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
@@ -542,10 +551,12 @@ async def get_cart_from_db(user_id):
 
 
 
-
 async def delete_cart_from_db(user_id):
     """حذف سلة التسوق من قاعدة البيانات"""
     try:
+        # تأكد من أن user_id هو integer
+        user_id = int(user_id)
+        
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(
@@ -553,10 +564,18 @@ async def delete_cart_from_db(user_id):
                     (user_id,)
                 )
             await conn.commit()
+            
+            # تحقق من الحذف
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT 1 FROM shopping_carts WHERE user_id = %s", (user_id,))
+                check = await cursor.fetchone()
+                logger.warning(f"🔍 تحقق بعد الحذف: {check}")
+                
         return True
     except Exception as e:
         logger.error(f"خطأ في حذف سلة التسوق: {e}")
         return False
+
 
 
 
@@ -2684,73 +2703,42 @@ async def add_item_to_cart(user_id: int, item_data: dict):
 
 
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
-    logger.warning("🔥 تم الضغط على زر حذف آخر وجبة.")
-    logger.warning(f"📍 context.user_data['conversation_state'] = {context.user_data.get('conversation_state')}")
-
-    query = update.callback_query
-    await query.answer()
-
     user_id = update.effective_user.id
-    logger.warning(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
-    print(f"🆔 [handle_remove_last_meal] user_id = {user_id}")
-
-    logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}")
-    cart = await get_cart_from_db(user_id) or []
-
-    logger.warning(f"📦 السلة قبل الحذف: {cart}")
-    print(f"📦 السلة قبل الحذف: {cart}")
-
-    if not cart:
-        logger.info("⚠️ لا توجد وجبات في السلة حالياً.")
-        await query.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
-        return ORDER_MEAL
-
-    last_item = cart.pop()
-    last_key = f"{last_item['name']} ({last_item['size']})" if last_item['size'] != "default" else last_item['name']
-    price = last_item.get("price", 0)
-
-    logger.info(f"🗑️ تم حذف آخر عنصر من السلة: {last_key} بسعر {price}")
-    total_price = sum(item.get("price", 0) for item in cart)
-    logger.warning(f"💰 المجموع الجديد بعد الحذف: {total_price}")
-
-    await save_cart_to_db(user_id, cart)
-
-    context.user_data['orders'] = cart
-    context.user_data['temporary_total_price'] = total_price
-
-    summary_counter = defaultdict(int)
-    for item in cart:
-        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item["name"]
-        summary_counter[label] += 1
-
-    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-    summary_text = "\n".join(summary_lines)
-
-    text = (
-        f"❌ تم حذف: {last_key} وقيمته {price}\n\n"
-        f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
-        f"💰 المجموع: {total_price} ل.س\n"
-        f"عندما تنتهي اختر ✅ تم من الأسفل"
-    )
-
-    summary_msg_id = context.user_data.get("summary_msg_id")
-    if summary_msg_id:
-        try:
-            await context.bot.delete_message(update.effective_chat.id, summary_msg_id)
-            logger.debug("🧹 تم حذف ملخص الطلب السابق بنجاح.")
-        except Exception as e:
-            logger.warning(f"⚠️ فشل في حذف ملخص الطلب السابق: {e}")
-
+    logger.warning(f"🧠 [handle_remove_last_meal] user_id = {user_id}, type = {type(user_id)}")
+    
+    # تسجيل حالة السلة قبل الحذف
     try:
-        msg = await query.message.reply_text(text)
-        context.user_data["summary_msg_id"] = msg.message_id
-        await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
-        logger.info("✅ تم تنفيذ handle_remove_last_meal بنجاح.")
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+                pre_check = await cursor.fetchone()
+                logger.warning(f"🔍 السلة قبل الحذف: {pre_check}")
     except Exception as e:
-        logger.error(f"❌ استثناء أثناء إرسال ملخص جديد: {e}", exc_info=True)
-        await query.message.reply_text("❌ حدث خطأ أثناء عرض الملخص الجديد.")
+        logger.error(f"❌ خطأ أثناء التحقق من السلة قبل الحذف: {e}")
+    
+    # استرجاع السلة
+    cart = await get_cart_from_db(user_id)
+    
+    if not cart or len(cart) == 0:
+        logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
+        await update.message.reply_text("❌ لا توجد وجبات في سلتك")
+        return MAIN_MENU
+    
+    # حذف آخر وجبة
+    cart.pop()
+    
+    # حفظ السلة المحدثة
+    await save_cart_to_db(user_id, cart)
+    
+    # عرض السلة المحدثة
+    if len(cart) > 0:
+        # عرض محتويات السلة
+        await display_cart(update, context)
+    else:
+        await update.message.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
+    
+    return MAIN_MENU
 
-    return ORDER_MEAL
 
 
 
