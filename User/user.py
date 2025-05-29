@@ -2758,6 +2758,7 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
 
 
+
 async def show_meals_in_category(update: Update, context: CallbackContext):
     category_id = context.user_data.get("selected_category_id")
     
