@@ -2683,15 +2683,15 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
     # تحديد ما إذا كان هذا callback أو رسالة عادية
     is_callback = update.callback_query is not None
-    
+
     if is_callback:
         query = update.callback_query
-        await query.answer()  # الرد على الزر لتجنب إشعار التحميل الدائم
-        message_obj = query.message  # استخدام message من callback_query
+        await query.answer()
+        message_obj = query.message
     else:
-        message_obj = update.message  # استخدام message مباشرة
+        message_obj = update.message
 
-    # تسجيل حالة السلة قبل الحذف
+    # تسجيل حالة السلة قبل الحذف من قاعدة البيانات
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
@@ -2701,22 +2701,24 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     except Exception as e:
         logger.error(f"❌ خطأ أثناء التحقق من السلة قبل الحذف: {e}")
 
-    # استرجاع السلة
-    cart = await get_cart_from_db(user_id)
+    # استرجاع السلة من قاعدة البيانات أو من context كنسخة احتياطية
+    cart = await get_cart_from_db(user_id) or context.user_data.get("cart", [])
 
     if not cart or len(cart) == 0:
         logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
         await message_obj.reply_text("❌ لا توجد وجبات في سلتك")
-        return MAIN_MENU
+        return ORDER_MEAL
 
     # حذف آخر وجبة
     removed_item = cart.pop()
     logger.warning(f"🗑️ تم حذف العنصر: {removed_item}")
 
-    # حفظ السلة المحدثة
+    # حفظ السلة المحدثة في قاعدة البيانات
     await save_cart_to_db(user_id, cart)
-    
-    # تسجيل حالة السلة بعد الحذف
+    await asyncio.sleep(0.1)  # تأخير لتفادي مشاكل التزامن
+    context.user_data["cart"] = cart  # حفظ نسخة داخلية للسلة
+
+    # تسجيل السلة بعد الحذف
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
@@ -2728,7 +2730,6 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
     # عرض السلة المحدثة
     if len(cart) > 0:
-        # إنشاء نص ملخص السلة
         summary_counter = defaultdict(int)
         for item in cart:
             label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
@@ -2741,9 +2742,10 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
         text = (
             f"✅ تم حذف: {removed_item['name']}\n\n"
             f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
-            f"💰 المجموع: {total_price} ل.س"
+            f"💰 المجموع: {total_price} ل.س\n"
+            f"عندما تنتهي اختر ✅ تم من الأسفل"
         )
-        
+
         await message_obj.reply_text(text)
     else:
         await message_obj.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
