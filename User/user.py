@@ -2680,7 +2680,10 @@ async def add_item_to_cart(user_id: int, item_data: dict):
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     logger.warning(f"🧠 [handle_remove_last_meal] user_id = {user_id}, type = {type(user_id)}")
-    
+
+    query = update.callback_query
+    await query.answer()  # الرد على الزر لتجنب إشعار التحميل الدائم
+
     # تسجيل حالة السلة قبل الحذف
     try:
         async with get_db_connection() as conn:
@@ -2690,29 +2693,29 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
                 logger.warning(f"🔍 السلة قبل الحذف: {pre_check}")
     except Exception as e:
         logger.error(f"❌ خطأ أثناء التحقق من السلة قبل الحذف: {e}")
-    
+
     # استرجاع السلة
     cart = await get_cart_from_db(user_id)
-    
+
     if not cart or len(cart) == 0:
         logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
-        await update.message.reply_text("❌ لا توجد وجبات في سلتك")
+        await query.message.reply_text("❌ لا توجد وجبات في سلتك")  # ✅ التصحيح هنا
         return MAIN_MENU
-    
+
     # حذف آخر وجبة
     cart.pop()
-    
+
     # حفظ السلة المحدثة
     await save_cart_to_db(user_id, cart)
-    
+
     # عرض السلة المحدثة
     if len(cart) > 0:
-        # عرض محتويات السلة
         await display_cart(update, context)
     else:
-        await update.message.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
-    
+        await query.message.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")  # ✅ التصحيح هنا أيضًا
+
     return MAIN_MENU
+
 
 
 
