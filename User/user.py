@@ -2748,7 +2748,7 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     else:
         await message_obj.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
 
-    return MAIN_MENU
+    return ORDER_MEAL
 
 
 
