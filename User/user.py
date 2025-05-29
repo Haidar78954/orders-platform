@@ -1867,11 +1867,11 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         now = datetime.now()
         context.user_data["last_fast_order_time"] = now
         context.user_data["last_order_time"] = now
-
+    
         cancel_times = context.user_data.get("cancel_history", [])
         cooldown, reason_msg = get_fast_order_cooldown(cancel_times)
         last_try = context.user_data.get("last_fast_order_time")
-
+    
         if last_try and (now - last_try).total_seconds() < cooldown:
             remaining = int(cooldown - (now - last_try).total_seconds())
             minutes = max(1, remaining // 60)
@@ -1880,81 +1880,86 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                 reply_markup=ReplyKeyboardMarkup([["القائمة الرئيسية 🪧"]], resize_keyboard=True)
             )
             return MAIN_MENU
-
-        for key in ['temporary_location_text', 'temporary_location_coords', 'temporary_total_price',
-                    'orders', 'order_confirmed', 'selected_restaurant']:
+    
+        # 🧹 تنظيف البيانات المؤقتة
+        for key in [
+            'temporary_location_text', 'temporary_location_coords',
+            'temporary_total_price', 'temporary_area_name', 'temporary_detailed_location',
+            'orders', 'order_confirmed', 'selected_restaurant', 'restaurant_map',
+            'selected_restaurant_id', 'selected_restaurant_name',
+            'selected_category_id', 'selected_category_name', 'go_ad_restaurant_name',
+            'current_meal_messages', 'conversation_state'
+        ]:
             context.user_data.pop(key, None)
-
+    
+        # 🗑️ حذف السلة من قاعدة البيانات
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
-                    await cursor.execute("SELECT phone FROM user_data WHERE user_id = %s", (user_id,))
-                    result = await cursor.fetchone()
-                    if not result:
-                        await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
-                        return await start(update, context)
-
-                    phone = result[0]
-
-                    await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
-                    if await cursor.fetchone():
-                        await update.message.reply_text("❌ رقمك محظور مؤقتاً من استخدام الخدمة.\nللاستفسار: @Support")
-                        return MAIN_MENU
-
-                    await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
-                    row = await cursor.fetchone()
-                    if not row:
-                        await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى التسجيل أولاً.")
-                        return await start(update, context)
-
-                    city_id = row[0]
-                    await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
-                    rows = await cursor.fetchall()
-
-                    if not rows:
-                        await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
-                        return MAIN_MENU
-
-                    restaurants = []
-                    restaurant_map = {}
-                    highlight_name = context.user_data.get("go_ad_restaurant_name")
-
-                    for restaurant_id, name, is_frozen in rows:
-                        if is_frozen:
-                            continue
-
-                        await cursor.execute(
-                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
-                            (restaurant_id,)
-                        )
-                        rating_data = await cursor.fetchone()
-                        avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
-                        label = f"{name} ⭐ ({avg})"
-                        if highlight_name and highlight_name in name:
-                            label = f"🔥 {label}"
-
-                        restaurants.append(label)
-                        restaurant_map[label] = {"id": restaurant_id, "name": name}
-
+                    await cursor.execute("DELETE FROM shopping_carts WHERE user_id = %s", (user_id,))
+                    await conn.commit()
+    
+                # ⛔ التحقق من الحظر
+                await cursor.execute("SELECT phone FROM user_data WHERE user_id = %s", (user_id,))
+                result = await cursor.fetchone()
+                if not result:
+                    await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
+                    return await start(update, context)
+    
+                phone = result[0]
+                await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
+                if await cursor.fetchone():
+                    await update.message.reply_text("❌ رقمك محظور مؤقتاً من استخدام الخدمة.\nللاستفسار: @Support")
+                    return MAIN_MENU
+    
+                # 📍 جلب المدينة
+                await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
+                row = await cursor.fetchone()
+                if not row:
+                    await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى التسجيل أولاً.")
+                    return await start(update, context)
+    
+                city_id = row[0]
+                await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
+                rows = await cursor.fetchall()
+    
+                if not rows:
+                    await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
+                    return MAIN_MENU
+    
+                # ✅ عرض المطاعم
+                restaurants = []
+                restaurant_map = {}
+                for restaurant_id, name, is_frozen in rows:
+                    if is_frozen:
+                        continue
+                    await cursor.execute("SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s", (restaurant_id,))
+                    rating_data = await cursor.fetchone()
+                    avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
+                    label = f"{name} ⭐ ({avg})"
+                    restaurants.append(label)
+                    restaurant_map[label] = {"id": restaurant_id, "name": name}
+    
             if not restaurants:
                 await update.message.reply_text("❌ جميع المطاعم في مدينتك مجمدة حالياً.")
                 return MAIN_MENU
-
+    
             restaurants += ["مطعمي المفضل وينو ؟ 😕", "القائمة الرئيسية 🪧"]
             context.user_data['restaurant_map'] = restaurant_map
-
+    
             keyboard_buttons = [KeyboardButton(name) for name in restaurants]
             keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
             reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
-
+    
             await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
             return SELECT_RESTAURANT
-
+    
         except Exception as e:
             import traceback
             logger.exception(f"❌ Database error in fast order: {e}")
             await update.message.reply_text(f"❌ خطأ داخلي:\n{e}")
             return MAIN_MENU
+
 
 def chunk_buttons(buttons, cols=2):
     return [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
@@ -2382,9 +2387,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 
 
 
-async def handle_order_category(update: Update, context: CallbackContext) -> int:
-    return await process_category_selection(update, context)
-
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
@@ -2434,7 +2436,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                     return ORDER_CATEGORY
 
                 await cursor.execute("""
-                    SELECT id, name, price, caption, image_message_id, size_options 
+                    SELECT id, name, price, caption, image_file_id, size_options 
                     FROM meals 
                     WHERE category_id = %s
                 """, (category_id,))
@@ -2446,7 +2448,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             await update.message.reply_text("❌ لا توجد وجبات حالياً في هذه الفئة.")
             return ORDER_CATEGORY
 
-        for meal_id, name, price, caption, image_message_id, size_options_json in meals:
+        for meal_id, name, price, caption, image_file_id, size_options_json in meals:
             try:
                 size_options = json.loads(size_options_json or "[]")
             except:
@@ -2468,31 +2470,41 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             ])
             reply_markup = InlineKeyboardMarkup(buttons)
 
-            text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
+            caption_text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
             if price:
-                text += f"\n💰 السعر: {price} ل.س"
+                caption_text += f"\n💰 السعر: {price} ل.س"
 
-            if image_message_id:
-                try:
-                    photo_msg = await context.bot.copy_message(
+            try:
+                if image_file_id and image_file_id.startswith("AgAC"):
+                    photo_msg = await context.bot.send_photo(
                         chat_id=update.effective_chat.id,
-                        from_chat_id=ADMIN_MEDIA_CHANNEL,
-                        message_id=image_message_id,
-                        reply_markup=reply_markup  # ✅ الزر مع الصورة
-                    )
-                    context.user_data["current_meal_messages"].append(photo_msg.message_id)
-                except Exception as e:
-                    logger.error(f"❌ فشل في نسخ صورة الوجبة '{name}': {e}")
-                    msg = await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=text,
+                        photo=image_file_id,
+                        caption=caption_text,
+                        parse_mode="HTML",
                         reply_markup=reply_markup
                     )
-                    context.user_data["current_meal_messages"].append(msg.message_id)
-            else:
+                    context.user_data["current_meal_messages"].append(photo_msg.message_id)
+                else:
+                    # fallback إلى copy_message بدون caption
+                    copied = await context.bot.copy_message(
+                        chat_id=update.effective_chat.id,
+                        from_chat_id=ADMIN_MEDIA_CHANNEL,
+                        message_id=int(image_file_id),
+                        reply_markup=reply_markup
+                    )
+                    # إرسال الكابشن كنص منفصل
+                    caption_msg = await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=caption_text,
+                        reply_markup=reply_markup
+                    )
+                    context.user_data["current_meal_messages"] += [copied.message_id, caption_msg.message_id]
+
+            except Exception as e:
+                logger.error(f"❌ فشل في عرض الوجبة '{name}': {e}")
                 msg = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text=text,
+                    text=caption_text,
                     reply_markup=reply_markup
                 )
                 context.user_data["current_meal_messages"].append(msg.message_id)
@@ -2509,7 +2521,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             reply_markup=reply_markup
         )
 
-        context.user_data["conversation_state"] = ORDER_MEAL  # ✅ للمتابعة أو التشخيص
+        context.user_data["conversation_state"] = ORDER_MEAL
         return ORDER_MEAL
 
     except Exception as e:
@@ -2524,6 +2536,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             text="❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً."
         )
         return ORDER_CATEGORY
+
 
 
 
@@ -2691,7 +2704,6 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 
-
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     logger.warning(f"🧠 [handle_remove_last_meal] user_id = {user_id}, type = {type(user_id)}")
@@ -2747,10 +2759,22 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
             f"💰 المجموع: {total_price} ل.س\n"
             f"عندما تنتهي اختر ✅ تم من الأسفل"
         )
-
-        await message_obj.reply_text(text)
     else:
-        await message_obj.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
+        text = "✅ تم حذف آخر وجبة. سلتك الآن فارغة."
+
+    # 🧹 حذف الرسالة السابقة إن وُجدت
+    msg_id = context.user_data.get("summary_msg_id")
+    if msg_id:
+        try:
+            await context.bot.delete_message(update.effective_chat.id, msg_id)
+            logger.debug("🧹 تم حذف ملخص الطلب السابق بنجاح")
+        except Exception as e:
+            logger.warning(f"⚠️ فشل في حذف ملخص الطلب السابق: {e}")
+
+    # ⬆️ إرسال رسالة جديدة وتحديث msg_id
+    msg = await message_obj.reply_text(text)
+    context.user_data["summary_msg_id"] = msg.message_id
+    await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
     return ORDER_MEAL
 
@@ -2765,7 +2789,7 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
 async def show_meals_in_category(update: Update, context: CallbackContext):
     category_id = context.user_data.get("selected_category_id")
-    
+
     if not category_id:
         logger.error("❌ لم يتم تحديد الفئة في show_meals_in_category")
         await update.message.reply_text("❌ حدث خطأ: لم يتم تحديد الفئة.")
@@ -2774,116 +2798,93 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                logger.debug(f"🔍 جلب الوجبات للفئة category_id={category_id}")
-                
-                # تعديل الاستعلام ليتوافق مع هيكل جدول meals الفعلي
                 await cursor.execute("""
                     SELECT id, name, caption, image_file_id, size_options, price
                     FROM meals
                     WHERE category_id = %s
                 """, (category_id,))
-                
                 meals = await cursor.fetchall()
-                
-                logger.debug(f"🍱 تم استرجاع {len(meals)} وجبة")
 
         if not meals:
-            logger.warning(f"⚠️ لا توجد وجبات في الفئة category_id={category_id}")
             await update.message.reply_text("❌ لا توجد وجبات في هذه الفئة.")
             return
 
-        # تتبع رسائل الوجبات لحذفها لاحقاً
         meal_messages = []
+        ADMIN_MEDIA_CHANNEL = -1002659459294  # تأكد من تعريفه
 
         for meal in meals:
-            # التحقق من عدد العناصر المسترجعة
-            if len(meal) < 4:
-                logger.error(f"❌ بيانات الوجبة غير مكتملة: {meal}")
-                continue
-                
-            # تعديل الترتيب ليتوافق مع الاستعلام الجديد
-            meal_id = meal[0]
-            meal_name = meal[1]
-            caption = meal[2]
-            image_file_id = meal[3]
-            size_options_json = meal[4] if len(meal) > 4 else None
-            price = meal[5] if len(meal) > 5 else 0
-            
+            meal_id, name, caption, image_file_id, size_json, price = meal
             try:
-                sizes = json.loads(size_options_json or "[]")
-            except json.JSONDecodeError as e:
-                logger.error(f"❌ خطأ في تحليل خيارات الحجم للوجبة {meal_name}: {e}")
+                sizes = json.loads(size_json or "[]")
+            except:
                 sizes = []
 
             buttons = []
             if sizes:
-                size_buttons = [
+                buttons.append([
                     InlineKeyboardButton(
-                        f"{size['name']} - {size['price']} ل.س",
-                        callback_data=f"add_meal_with_size:{meal_id}:{size['name']}"
-                    )
-                    for size in sizes
-                ]
-                buttons.append(size_buttons)
+                        f"{opt['name']} - {opt['price']} ل.س",
+                        callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
+                    ) for opt in sizes
+                ])
             else:
                 buttons.append([
                     InlineKeyboardButton(f"➕ أضف للسلة ({price} ل.س)", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
-
             buttons.append([
                 InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal"),
                 InlineKeyboardButton("✅ تم", callback_data="done_adding_meals")
             ])
-
             reply_markup = InlineKeyboardMarkup(buttons)
 
-            # إرسال الصورة إذا وجدت
+            # 🧠 بناء النص
+            caption_text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
+            caption_text += f"\n💰 السعر: {price} ل.س" if price else ""
+
             if image_file_id:
                 try:
-                    # تغيير من image_message_id إلى image_file_id
-                    ADMIN_MEDIA_CHANNEL = -1002659459294  # تأكد من تعريف هذا المتغير
-                    
-                    # استخدام file_id مباشرة إذا كان متاحاً
-                    if image_file_id.startswith("AgAC"):
-                        # إذا كان file_id صالح
+                    if image_file_id.startswith("AgAC"):  # file_id مباشر
                         photo_msg = await context.bot.send_photo(
                             chat_id=update.effective_chat.id,
-                            photo=image_file_id
+                            photo=image_file_id,
+                            caption=caption_text,
+                            reply_markup=reply_markup,
+                            parse_mode="HTML"
                         )
                         meal_messages.append(photo_msg.message_id)
-                    else:
-                        # إذا كان message_id
-                        try:
-                            copied_msg = await context.bot.copy_message(
-                                chat_id=update.effective_chat.id,
-                                from_chat_id=ADMIN_MEDIA_CHANNEL,
-                                message_id=int(image_file_id)
-                            )
-                            meal_messages.append(copied_msg.message_id)
-                        except ValueError:
-                            logger.error(f"❌ قيمة image_file_id غير صالحة: {image_file_id}")
-                    
-                    text_msg = await update.message.reply_text(
-                        f"{meal_name}\n\n{caption}" if caption else meal_name,
-                        reply_markup=reply_markup
-                    )
-                    meal_messages.append(text_msg.message_id)
-                    
+                    else:  # message_id
+                        copied = await context.bot.copy_message(
+                            chat_id=update.effective_chat.id,
+                            from_chat_id=ADMIN_MEDIA_CHANNEL,
+                            message_id=int(image_file_id)
+                        )
+                        meal_messages.append(copied.message_id)
+
+                        # إرسال الاسم والكابشن والزر بشكل منفصل
+                        txt = await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=caption_text,
+                            reply_markup=reply_markup,
+                            parse_mode="HTML"
+                        )
+                        meal_messages.append(txt.message_id)
+
                 except Exception as e:
-                    logger.error(f"❌ فشل تحميل صورة الوجبة '{meal_name}': {e}", exc_info=True)
-                    text_msg = await update.message.reply_text(
-                        f"{meal_name}\n\n{caption}" if caption else meal_name,
+                    logger.error(f"❌ خطأ أثناء عرض {name}: {e}")
+                    txt = await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=caption_text,
                         reply_markup=reply_markup
                     )
-                    meal_messages.append(text_msg.message_id)
+                    meal_messages.append(txt.message_id)
             else:
-                text_msg = await update.message.reply_text(
-                    f"{meal_name}\n\n{caption}" if caption else meal_name,
+                txt = await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=caption_text,
                     reply_markup=reply_markup
                 )
-                meal_messages.append(text_msg.message_id)
+                meal_messages.append(txt.message_id)
 
-        # حفظ معرفات الرسائل لحذفها لاحقاً
         context.user_data["current_meal_messages"] = meal_messages
 
     except Exception as e:
@@ -5086,13 +5087,13 @@ conv_handler = ConversationHandler(
             CallbackQueryHandler(handle_done_adding_meals, pattern="^done_adding_meals$"),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
             MessageHandler(filters.Regex("^تم ✅$"), handle_done_adding_meals),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, process_category_selection)
         ],
         ASK_ORDER_NOTES: [
             MessageHandler(filters.Regex("^عودة ➡️$"), handle_order_category),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_order_notes)
         ],
-
         CONFIRM_ORDER: [
             MessageHandler(filters.Regex("إلغاء ❌"), handle_final_cancellation),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu)
