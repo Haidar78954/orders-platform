@@ -2386,7 +2386,9 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
         return SELECT_RESTAURANT
 
 
-
+async def handle_order_category(update: Update, context: CallbackContext) -> int:
+    return await process_category_selection(update, context)
+    
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
