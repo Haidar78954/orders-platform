@@ -2710,79 +2710,59 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 
-async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
+async def handle_remove_last_meal(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    message = query.message
     user_id = update.effective_user.id
-    logger.warning(f"🧠 [handle_remove_last_meal] user_id = {user_id}, type = {type(user_id)}")
 
-    # تحديد ما إذا كان هذا callback أو رسالة عادية
-    is_callback = update.callback_query is not None
+    # استخراج اسم الوجبة من الكابشن أو النص
+    meal_name = None
+    if message.caption:
+        lines = message.caption.splitlines()
+        if lines:
+            meal_name = lines[0].replace("🍽️", "").strip()
+    elif message.text:
+        lines = message.text.splitlines()
+        if lines:
+            meal_name = lines[0].replace("🍽️", "").strip()
 
-    if is_callback:
-        query = update.callback_query
-        await query.answer()
-        message_obj = query.message
-    else:
-        message_obj = update.message
+    if not meal_name:
+        await query.edit_message_text("❌ لم نتمكن من تحديد اسم الوجبة.")
+        return
 
-    # استخدام نسخة محلية من السلة من context.user_data إذا كانت موجودة
-    local_cart = context.user_data.get("orders", [])
-    
-    # محاولة استرجاع السلة من قاعدة البيانات كخيار ثانٍ
-    db_cart = await get_cart_from_db(user_id)
-    
-    # استخدام النسخة المحلية إذا كانت موجودة، وإلا استخدام نسخة قاعدة البيانات
-    cart = local_cart if local_cart else (db_cart or [])
-    
-    if not cart or len(cart) == 0:
-        logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
-        await message_obj.reply_text("❌ لا توجد وجبات في سلتك")
-        return ORDER_MEAL
+    # تحميل السلة من قاعدة البيانات
+    cart = await get_user_cart(user_id)
 
-    # حذف آخر وجبة
-    removed_item = cart.pop()
-    logger.warning(f"🗑️ تم حذف العنصر: {removed_item}")
+    if not cart:
+        await query.edit_message_text("❌ السلة فارغة حالياً.")
+        return
 
-    # حفظ السلة المحدثة في قاعدة البيانات
-    await save_cart_to_db(user_id, cart)
-    
-    # تحديث النسخة المحلية أيضاً
-    context.user_data["orders"] = cart
+    # البحث عن آخر عنصر بنفس اسم الوجبة
+    index_to_remove = None
+    for i in reversed(range(len(cart))):
+        if cart[i]["name"] == meal_name:
+            index_to_remove = i
+            break
 
-    # عرض السلة المحدثة
-    if len(cart) > 0:
-        summary_counter = defaultdict(int)
-        for item in cart:
-            label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
-            summary_counter[label] += 1
+    if index_to_remove is None:
+        await query.edit_message_text("❌ لم تقم بإضافة شيء من هذه الوجبة بعد.")
+        return
 
-        summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-        summary_text = "\n".join(summary_lines)
-        total_price = sum(item.get("price", 0) for item in cart)
+    # حذف اللمسة الأخيرة المطابقة
+    removed = cart.pop(index_to_remove)
+    await save_user_cart(user_id, cart)
 
-        text = (
-            f"✅ تم حذف: {removed_item['name']}\n\n"
-            f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
-            f"💰 المجموع: {total_price} ل.س\n"
-            f"عندما تنتهي اختر ✅ تم من الأسفل"
-        )
-    else:
-        text = "✅ تم حذف آخر وجبة. سلتك الآن فارغة."
+    # عرض ملخص جديد
+    summary = build_cart_summary(cart)
+    await query.edit_message_text(
+        f"✅ تم حذف آخر لمسة من الوجبة: {removed['name']} ({removed.get('size', 'default')})\n\n📦 ملخص طلبك الآن:\n{summary}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")]
+        ])
+    )
 
-    # 🧹 حذف الرسالة السابقة إن وُجدت
-    msg_id = context.user_data.get("summary_msg_id")
-    if msg_id:
-        try:
-            await context.bot.delete_message(update.effective_chat.id, msg_id)
-            logger.debug("🧹 تم حذف ملخص الطلب السابق بنجاح")
-        except Exception as e:
-            logger.warning(f"⚠️ فشل في حذف ملخص الطلب السابق: {e}")
-
-    # ⬆️ إرسال رسالة جديدة وتحديث msg_id
-    msg = await message_obj.reply_text(text)
-    context.user_data["summary_msg_id"] = msg.message_id
-    await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
-
-    return ORDER_MEAL
 
 
 
@@ -2925,10 +2905,11 @@ async def handle_done_adding_meals(update: Update, context: CallbackContext) -> 
     reply_markup = ReplyKeyboardMarkup(
         [
             ["تخطي ➡️"],
-            ["عودة ➡️", "القائمة الرئيسية 🪧"]
+            ["القائمة الرئيسية 🪧"]
         ],
         resize_keyboard=True
     )
+
 
     await update.message.reply_text(
         f"🛒 *ملخص طلبك:*\n{summary_text}\n\n"
