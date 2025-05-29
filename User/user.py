@@ -340,7 +340,6 @@ class DBConnectionPool:
         self.connections = []
         self.semaphore = asyncio.Semaphore(max_connections)
 
-
     async def get_connection(self):
         await self.semaphore.acquire()
         if not self.connections:
@@ -351,10 +350,14 @@ class DBConnectionPool:
                 db=DB_NAME,
                 port=DB_PORT,
                 charset='utf8mb4',
-                autocommit=False
+                autocommit=True  # ✅ تم التفعيل هنا
             )
+            # تعيين مستوى العزل إلى READ COMMITTED
+            async with conn.cursor() as cursor:
+                await cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
             return conn
         return self.connections.pop()
+
 
     async def release_connection(self, conn):
         self.connections.append(conn)
@@ -481,8 +484,10 @@ async def send_message_with_rate_limit(chat_id, text, **kwargs):
     await telegram_limiter.acquire()
     return await send_message_with_retry(context.bot, chat_id, text=text, **kwargs)
 
+
+
+
 async def save_cart_to_db(user_id, cart_data):
-    save_cart_to_db
     logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}, type = {type(user_id)}")
     try:
         # تأكد من أن user_id هو integer
@@ -504,12 +509,19 @@ async def save_cart_to_db(user_id, cart_data):
                 )
             await conn.commit()
 
-        # تحقق من الحفظ
-        async with get_db_connection() as conn:
+            # قراءة البيانات مباشرة بعد الكتابة باستخدام نفس الاتصال
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
                 check = await cursor.fetchone()
                 logger.warning(f"🔍 تحقق بعد الحفظ: {check}")
+                
+                # تخزين البيانات المقروءة في متغير عالمي أو في context.user_data
+                if check and check[0]:
+                    cart_data_read = check[0]
+                    if isinstance(cart_data_read, bytes):
+                        cart_data_read = cart_data_read.decode("utf-8")
+                    cart = json.loads(cart_data_read)
+                    # يمكن تخزين هذه القيمة في مكان آمن للاستخدام اللاحق
 
         return True
 
@@ -2594,7 +2606,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 logger.info(f"🛒 item_data المحضر للإضافة إلى السلة: {item_data}")
 
                 logger.warning("🚧 سيتم الآن استدعاء add_item_to_cart")
-                orders, total_price = await add_item_to_cart(user_id, item_data)
+                orders, total_price = await add_item_to_cart(user_id, item_data, context)  # ✅ التعديل هنا
                 logger.warning("✅ add_item_to_cart تم تنفيذه بنجاح")
 
                 context.user_data["orders"] = orders
@@ -2645,7 +2657,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 
-async def add_item_to_cart(user_id: int, item_data: dict):
+async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackContext):
     user_id = int(user_id)
     logger.warning(f"🆔 [add_item_to_cart] user_id = {user_id}")
     print(f"🆔 [add_item_to_cart] user_id = {user_id}")
@@ -2665,6 +2677,9 @@ async def add_item_to_cart(user_id: int, item_data: dict):
         saved = await save_cart_to_db(user_id, cart)
         if not saved:
             logger.warning(f"⚠️ لم يتم حفظ السلة للمستخدم {user_id}")
+
+        # ✅ حفظ نسخة محلية من السلة داخل context
+        context.user_data["cart"] = cart
 
         total_price = sum(item.get("price", 0) for item in cart)
         logger.info(f"✅ تم حفظ السلة للمستخدم {user_id}، المجموع = {total_price}")
@@ -2691,19 +2706,15 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     else:
         message_obj = update.message
 
-    # تسجيل حالة السلة قبل الحذف من قاعدة البيانات
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
-                pre_check = await cursor.fetchone()
-                logger.warning(f"🔍 السلة قبل الحذف: {pre_check}")
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء التحقق من السلة قبل الحذف: {e}")
-
-    # استرجاع السلة من قاعدة البيانات أو من context كنسخة احتياطية
-    cart = await get_cart_from_db(user_id) or context.user_data.get("cart", [])
-
+    # استخدام نسخة محلية من السلة من context.user_data إذا كانت موجودة
+    local_cart = context.user_data.get("orders", [])
+    
+    # محاولة استرجاع السلة من قاعدة البيانات كخيار ثانٍ
+    db_cart = await get_cart_from_db(user_id)
+    
+    # استخدام النسخة المحلية إذا كانت موجودة، وإلا استخدام نسخة قاعدة البيانات
+    cart = local_cart if local_cart else (db_cart or [])
+    
     if not cart or len(cart) == 0:
         logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
         await message_obj.reply_text("❌ لا توجد وجبات في سلتك")
@@ -2715,18 +2726,9 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
     # حفظ السلة المحدثة في قاعدة البيانات
     await save_cart_to_db(user_id, cart)
-    await asyncio.sleep(0.1)  # تأخير لتفادي مشاكل التزامن
-    context.user_data["cart"] = cart  # حفظ نسخة داخلية للسلة
-
-    # تسجيل السلة بعد الحذف
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
-                post_check = await cursor.fetchone()
-                logger.warning(f"🔍 السلة بعد الحذف: {post_check}")
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء التحقق من السلة بعد الحذف: {e}")
+    
+    # تحديث النسخة المحلية أيضاً
+    context.user_data["orders"] = cart
 
     # عرض السلة المحدثة
     if len(cart) > 0:
