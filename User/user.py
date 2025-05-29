@@ -402,6 +402,7 @@ async def get_user_lock(user_id):
 
 async def update_conversation_state(user_id, key, value):
     """تحديث قيمة محددة في حالة المحادثة"""
+    user_id = int(user_id)
     try:
         # الحصول على الحالة الحالية
         current_state = await get_conversation_state(user_id)
@@ -481,6 +482,7 @@ async def send_message_with_rate_limit(chat_id, text, **kwargs):
     return await send_message_with_retry(context.bot, chat_id, text=text, **kwargs)
 
 async def save_cart_to_db(user_id, cart_data):
+    save_cart_to_db
     logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}, type = {type(user_id)}")
     try:
         # تأكد من أن user_id هو integer
@@ -520,6 +522,8 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
+    user_id = int(user_id)
+    await asyncio.sleep(0.1)  # تأخير بسيط قبل القراءة
     logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}, type = {type(user_id)}")
     try:
         # تأكد من أن user_id هو integer
@@ -552,6 +556,7 @@ async def get_cart_from_db(user_id):
 
 
 async def delete_cart_from_db(user_id):
+    user_id = int(user_id)
     """حذف سلة التسوق من قاعدة البيانات"""
     try:
         # تأكد من أن user_id هو integer
@@ -606,39 +611,6 @@ async def retry_with_backoff(func, *args, max_retries=5, initial_wait=0.5, **kwa
     raise Exception(f"فشلت جميع المحاولات بعد {max_retries} محاولات. آخر خطأ: {last_exception}")
 
 
-async def save_cart_to_db(user_id, cart_data):
-    logger.warning(f"🧠 [save_cart_to_db] user_id = {user_id}")
-    print(f"🧠 [save_cart_to_db] user_id = {user_id}")
-
-    try:
-        json_data = json.dumps(cart_data, ensure_ascii=False)
-        logger.warning(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
-        print(f"📤 [save_cart_to_db] البيانات للحفظ: {json_data}")
-
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(
-                    "REPLACE INTO shopping_carts (user_id, cart_data) VALUES (%s, %s)",
-                    (user_id, json_data)
-                )
-            await conn.commit()
-
-        logger.info(f"✅ تم حفظ السلة بنجاح في جدول shopping_carts للمستخدم {user_id}")
-
-        # تحقق من الحفظ مباشرة
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
-                check = await cursor.fetchone()
-                logger.warning(f"🔍 تحقق بعد الحفظ: {check}")
-                print(f"🔍 تحقق بعد الحفظ: {check}")
-
-        return True
-
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء حفظ السلة في قاعدة البيانات: {e}", exc_info=True)
-        return False
-
 
 
 
@@ -654,6 +626,7 @@ async def delete_cart_from_db(user_id):
 
 
 async def save_conversation_state(user_id, state_data):
+    user_id = int(user_id)
     """حفظ حالة المحادثة في قاعدة البيانات"""
     user_lock = await get_user_lock(user_id)
     async with user_lock:  # استخدام قفل خاص بالمستخدم
@@ -691,6 +664,7 @@ async def save_conversation_state(user_id, state_data):
 
 
 async def get_conversation_state(user_id):
+    user_id = int(user_id)
     """استرجاع حالة المحادثة من قاعدة البيانات"""
     try:
         async with get_db_connection() as conn:
@@ -2672,6 +2646,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
 
 async def add_item_to_cart(user_id: int, item_data: dict):
+    user_id = int(user_id)
     logger.warning(f"🆔 [add_item_to_cart] user_id = {user_id}")
     print(f"🆔 [add_item_to_cart] user_id = {user_id}")
 
