@@ -1867,11 +1867,11 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
         now = datetime.now()
         context.user_data["last_fast_order_time"] = now
         context.user_data["last_order_time"] = now
-    
+
         cancel_times = context.user_data.get("cancel_history", [])
         cooldown, reason_msg = get_fast_order_cooldown(cancel_times)
         last_try = context.user_data.get("last_fast_order_time")
-    
+
         if last_try and (now - last_try).total_seconds() < cooldown:
             remaining = int(cooldown - (now - last_try).total_seconds())
             minutes = max(1, remaining // 60)
@@ -1880,7 +1880,7 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
                 reply_markup=ReplyKeyboardMarkup([["القائمة الرئيسية 🪧"]], resize_keyboard=True)
             )
             return MAIN_MENU
-    
+
         # 🧹 تنظيف البيانات المؤقتة
         for key in [
             'temporary_location_text', 'temporary_location_coords',
@@ -1891,74 +1891,78 @@ async def main_menu(update: Update, context: CallbackContext) -> int:
             'current_meal_messages', 'conversation_state'
         ]:
             context.user_data.pop(key, None)
-    
-        # 🗑️ حذف السلة من قاعدة البيانات
+
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
+                    # 🗑️ حذف السلة
                     await cursor.execute("DELETE FROM shopping_carts WHERE user_id = %s", (user_id,))
                     await conn.commit()
-    
-                # ⛔ التحقق من الحظر
-                await cursor.execute("SELECT phone FROM user_data WHERE user_id = %s", (user_id,))
-                result = await cursor.fetchone()
-                if not result:
-                    await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
-                    return await start(update, context)
-    
-                phone = result[0]
-                await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
-                if await cursor.fetchone():
-                    await update.message.reply_text("❌ رقمك محظور مؤقتاً من استخدام الخدمة.\nللاستفسار: @Support")
-                    return MAIN_MENU
-    
-                # 📍 جلب المدينة
-                await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
-                row = await cursor.fetchone()
-                if not row:
-                    await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى التسجيل أولاً.")
-                    return await start(update, context)
-    
-                city_id = row[0]
-                await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
-                rows = await cursor.fetchall()
-    
-                if not rows:
-                    await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
-                    return MAIN_MENU
-    
-                # ✅ عرض المطاعم
-                restaurants = []
-                restaurant_map = {}
-                for restaurant_id, name, is_frozen in rows:
-                    if is_frozen:
-                        continue
-                    await cursor.execute("SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s", (restaurant_id,))
-                    rating_data = await cursor.fetchone()
-                    avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
-                    label = f"{name} ⭐ ({avg})"
-                    restaurants.append(label)
-                    restaurant_map[label] = {"id": restaurant_id, "name": name}
-    
+
+                    # التحقق من الحظر
+                    await cursor.execute("SELECT phone FROM user_data WHERE user_id = %s", (user_id,))
+                    result = await cursor.fetchone()
+                    if not result:
+                        await update.message.reply_text("❌ لم يتم العثور على رقم هاتفك. يرجى إعادة التسجيل.")
+                        return await start(update, context)
+
+                    phone = result[0]
+                    await cursor.execute("SELECT 1 FROM blacklisted_numbers WHERE phone = %s", (phone,))
+                    if await cursor.fetchone():
+                        await update.message.reply_text("❌ رقمك محظور مؤقتاً من استخدام الخدمة.\nللاستفسار: @Support")
+                        return MAIN_MENU
+
+                    # 📍 جلب المدينة
+                    await cursor.execute("SELECT city_id FROM user_data WHERE user_id = %s", (user_id,))
+                    row = await cursor.fetchone()
+                    if not row:
+                        await update.message.reply_text("❌ لم يتم العثور على مدينة مسجلة. يرجى التسجيل أولاً.")
+                        return await start(update, context)
+
+                    city_id = row[0]
+                    await cursor.execute("SELECT id, name, is_frozen FROM restaurants WHERE city_id = %s", (city_id,))
+                    rows = await cursor.fetchall()
+
+                    if not rows:
+                        await update.message.reply_text("❌ لا يوجد مطاعم حالياً في مدينتك.")
+                        return MAIN_MENU
+
+                    # ✅ عرض المطاعم
+                    restaurants = []
+                    restaurant_map = {}
+                    for restaurant_id, name, is_frozen in rows:
+                        if is_frozen:
+                            continue
+                        await cursor.execute(
+                            "SELECT COUNT(*), AVG(rating) FROM restaurant_ratings WHERE restaurant_id = %s",
+                            (restaurant_id,)
+                        )
+                        rating_data = await cursor.fetchone()
+                        avg = round(rating_data[1], 1) if rating_data and rating_data[0] > 0 else 0
+                        label = f"{name} ⭐ ({avg})"
+                        restaurants.append(label)
+                        restaurant_map[label] = {"id": restaurant_id, "name": name}
+
             if not restaurants:
                 await update.message.reply_text("❌ جميع المطاعم في مدينتك مجمدة حالياً.")
                 return MAIN_MENU
-    
+
             restaurants += ["مطعمي المفضل وينو ؟ 😕", "القائمة الرئيسية 🪧"]
             context.user_data['restaurant_map'] = restaurant_map
-    
+
             keyboard_buttons = [KeyboardButton(name) for name in restaurants]
             keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
             reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
-    
+
             await update.message.reply_text("🔽 اختر المطعم الذي ترغب بالطلب منه:", reply_markup=reply_markup)
             return SELECT_RESTAURANT
-    
+
         except Exception as e:
             import traceback
             logger.exception(f"❌ Database error in fast order: {e}")
             await update.message.reply_text(f"❌ خطأ داخلي:\n{e}")
             return MAIN_MENU
+
 
 
 def chunk_buttons(buttons, cols=2):
