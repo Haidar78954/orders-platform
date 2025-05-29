@@ -2681,8 +2681,15 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     user_id = update.effective_user.id
     logger.warning(f"🧠 [handle_remove_last_meal] user_id = {user_id}, type = {type(user_id)}")
 
-    query = update.callback_query
-    await query.answer()  # الرد على الزر لتجنب إشعار التحميل الدائم
+    # تحديد ما إذا كان هذا callback أو رسالة عادية
+    is_callback = update.callback_query is not None
+    
+    if is_callback:
+        query = update.callback_query
+        await query.answer()  # الرد على الزر لتجنب إشعار التحميل الدائم
+        message_obj = query.message  # استخدام message من callback_query
+    else:
+        message_obj = update.message  # استخدام message مباشرة
 
     # تسجيل حالة السلة قبل الحذف
     try:
@@ -2699,22 +2706,50 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
 
     if not cart or len(cart) == 0:
         logger.warning(f"⚠️ [handle_remove_last_meal] السلة فارغة للمستخدم {user_id}")
-        await query.message.reply_text("❌ لا توجد وجبات في سلتك")  # ✅ التصحيح هنا
+        await message_obj.reply_text("❌ لا توجد وجبات في سلتك")
         return MAIN_MENU
 
     # حذف آخر وجبة
-    cart.pop()
+    removed_item = cart.pop()
+    logger.warning(f"🗑️ تم حذف العنصر: {removed_item}")
 
     # حفظ السلة المحدثة
     await save_cart_to_db(user_id, cart)
+    
+    # تسجيل حالة السلة بعد الحذف
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+                post_check = await cursor.fetchone()
+                logger.warning(f"🔍 السلة بعد الحذف: {post_check}")
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء التحقق من السلة بعد الحذف: {e}")
 
     # عرض السلة المحدثة
     if len(cart) > 0:
-        await display_cart(update, context)
+        # إنشاء نص ملخص السلة
+        summary_counter = defaultdict(int)
+        for item in cart:
+            label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
+            summary_counter[label] += 1
+
+        summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
+        summary_text = "\n".join(summary_lines)
+        total_price = sum(item.get("price", 0) for item in cart)
+
+        text = (
+            f"✅ تم حذف: {removed_item['name']}\n\n"
+            f"🛒 طلبك حتى الآن:\n{summary_text}\n\n"
+            f"💰 المجموع: {total_price} ل.س"
+        )
+        
+        await message_obj.reply_text(text)
     else:
-        await query.message.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")  # ✅ التصحيح هنا أيضًا
+        await message_obj.reply_text("✅ تم حذف آخر وجبة. سلتك الآن فارغة.")
 
     return MAIN_MENU
+
 
 
 
