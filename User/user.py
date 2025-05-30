@@ -2710,7 +2710,16 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-    meal_with_size = update.callback_query.data.replace("delete_", "").strip().lower()
+    meal_with_size = update.callback_query.data.replace("delete_", "").strip()
+
+    # محاولة استخراج الاسم والقياس من النص
+    try:
+        meal_name, meal_size = meal_with_size.rsplit("(", 1)
+        meal_name = meal_name.strip()
+        meal_size = meal_size.replace(")", "").strip()
+    except ValueError:
+        await update.callback_query.answer("❌ صيغة غير صحيحة للوجبة.")
+        return ORDER_MEAL
 
     # استرجاع السلة الحالية
     cart = await get_cart_from_db(user_id) or []
@@ -2722,10 +2731,8 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     # البحث عن الوجبة المراد حذفها
     found = False
     cart_after_deletion = []
-
     for item in cart:
-        item_label = f"{item['name']} ({item['size']})" if item.get("size") != "default" else item["name"]
-        if item_label.strip().lower() == meal_with_size and not found:
+        if not found and item['name'] == meal_name and item['size'] == meal_size:
             found = True
             continue
         cart_after_deletion.append(item)
@@ -2737,31 +2744,39 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     # حفظ السلة بعد الحذف
     await save_cart_to_db(user_id, cart_after_deletion)
     await asyncio.sleep(0.5)
+
+    # تحديث النسخة المحلية في user_data
     context.user_data['orders'] = cart_after_deletion
 
-    # تأكيد التحديث
+    # تأكيد التحقق من الحفظ
     saved_cart = await get_cart_from_db(user_id)
     if saved_cart != cart_after_deletion:
         logger.error(f"❌ تناقض في البيانات بعد الحذف: المحفوظ {saved_cart} مقابل المتوقع {cart_after_deletion}")
         await save_cart_to_db(user_id, cart_after_deletion)
 
-    # عرض رسالة تأكيد
-    await update.callback_query.answer(f"✅ تم حذف آخر لمسة من الوجبة: {meal_with_size}")
+    # عرض رسالة تأكيد الحذف
+    await update.callback_query.answer(f"✅ تم حذف آخر لمسة من الوجبة: {meal_name} ({meal_size})")
 
-    # إعداد ملخص
+    # حساب المجموع الجديد
     total_price = sum(item['price'] for item in cart_after_deletion)
+
+    # إعداد ملخص الطلب
     summary_counter = defaultdict(int)
     for item in cart_after_deletion:
         label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
         summary_counter[label] += 1
+
     summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
     summary_text = "\n".join(summary_lines)
 
+    # إرسال ملخص محدث
     await update.callback_query.edit_message_text(
         f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
         f"💰 المجموع: {total_price} ل.س\n"
         "عندما تنتهي اختر ✅ تم من الأسفل"
     )
+
+    return ORDER_MEAL
 
 
 
