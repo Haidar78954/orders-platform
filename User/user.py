@@ -3154,7 +3154,7 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
             "🗺️ ما اسم المنطقة أو الشارع الذي تسكن فيه؟ (مثلاً: الزراعة - شارع القلعة)",
             reply_markup=ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
         )
-        return ASK_NEW_AREA_NAME
+        return await ask_new_location(update, context)
 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات.")
@@ -5216,12 +5216,12 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("عودة ⬅️"), ask_new_location)
         ],
         ASK_NEW_AREA_NAME: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_new_area_name),
-            MessageHandler(filters.Regex("عودة ⬅️"), ask_new_location)
+            MessageHandler(filters.Regex("عودة ⬅️"), ask_order_location),  # رجوع للخطوة الأصلية
+            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_new_area_name)
         ],
         ASK_NEW_DETAILED_LOCATION: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_new_detailed_location),
-            MessageHandler(filters.Regex("عودة ⬅️"), ask_new_location)
+            MessageHandler(filters.Regex("عودة ⬅️"), ask_new_area_name),  # رجوع للمنطقة
+            MessageHandler(filters.TEXT & ~filters.COMMAND, ask_new_detailed_location)
         ],
         CANCEL_ORDER_OPTIONS: [
             MessageHandler(filters.Regex("ذكرلي المطعم بطلبي 🙋"), handle_reminder),
