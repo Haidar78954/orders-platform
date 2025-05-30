@@ -2472,7 +2472,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             if size_options:
                 size_buttons = [
                     InlineKeyboardButton(
-                        f"{opt['name']}\n{opt['price']}",
+                        f"{opt['name']} - {opt['price']} ل.س",
                         callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
                     )
                     for opt in size_options
@@ -2484,7 +2484,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                     InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
 
-            # زر حذف اللمسة الأخيرة (مرة واحدة لكل وجبة)
+            # زر حذف اللمسة الأخيرة
             buttons.append([
                 InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"remove_specific_meal:{meal_id}:last")
             ])
@@ -2553,6 +2553,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             text="❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً."
         )
         return ORDER_CATEGORY
+
 
 
 
@@ -3257,7 +3258,12 @@ async def handle_new_location(update: Update, context: CallbackContext) -> int:
             "تمام 🐸",
             reply_markup=reply_markup
         )
-        return await ask_new_area_name(update, context)
+        await update.message.reply_text(
+            "🗺️ ما اسم المنطقة أو الشارع الذي تسكن فيه؟ (مثلاً: الزراعة - شارع القلعة)",
+            reply_markup=ReplyKeyboardMarkup([["عودة ⬅️"]], resize_keyboard=True)
+        )
+        return ASK_NEW_AREA_NAME
+
 
     await update.message.reply_text("❌ لم يتم استلام موقع صالح. يرجى استخدام الزر لإرسال موقعك.")
     return ASK_NEW_LOCATION_IMAGE
