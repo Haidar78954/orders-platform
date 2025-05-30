@@ -2721,12 +2721,13 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
     meal_with_size = callback_data.replace("delete_", "").strip()
 
     # محاولة استخراج الاسم والقياس
-    match = re.match(r"delete_(.+?)\s*\((.+?)\)$", callback_data)
-    if not match:
+    try:
+        meal_name, meal_size = meal_with_size.rsplit("(", 1)
+        meal_name = meal_name.strip()
+        meal_size = meal_size.replace(")", "").strip()
+    except ValueError:
         await update.callback_query.answer("❌ صيغة غير صحيحة للوجبة.")
-    meal_name = match.group(1).strip()
-    meal_size = match.group(2).strip()
-    return ORDER_MEAL
+        return ORDER_MEAL
 
     # استرجاع السلة
     cart = await get_cart_from_db(user_id) or []
