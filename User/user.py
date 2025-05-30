@@ -2401,7 +2401,6 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
 async def handle_order_category(update: Update, context: CallbackContext) -> int:
     return await process_category_selection(update, context)
 
-
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
@@ -2431,6 +2430,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     context.user_data['selected_category_id'] = category_id
     context.user_data['selected_category_name'] = category_name
 
+    # حذف الرسائل القديمة
     for msg_id in context.user_data.get("current_meal_messages", []):
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
@@ -2470,23 +2470,25 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
             buttons = []
             if size_options:
-                for opt in size_options:
-                    add_btn = InlineKeyboardButton(
+                size_buttons = [
+                    InlineKeyboardButton(
                         f"{opt['name']}\n{opt['price']}",
                         callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
                     )
-                    delete_btn = InlineKeyboardButton(
-                        "❌ حذف اللمسة الأخيرة",
-                        callback_data=f"delete_{name} ({opt['name']})"
-                    )
-                    buttons.append([add_btn, delete_btn])
+                    for opt in size_options
+                ]
+                for i in range(0, len(size_buttons), 2):
+                    buttons.append(size_buttons[i:i + 2])
             else:
                 buttons.append([
                     InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
-                buttons.append([
-                    InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"remove_specific_meal:{meal_id}:default")
-                ])
+
+            # زر حذف اللمسة الأخيرة (مرة واحدة لكل وجبة)
+            buttons.append([
+                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"remove_specific_meal:{meal_id}:last")
+            ])
+
             reply_markup = InlineKeyboardMarkup(buttons)
 
             caption_text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
@@ -2551,6 +2553,7 @@ async def process_category_selection(update: Update, context: CallbackContext) -
             text="❌ حدث خطأ أثناء تحميل الوجبات. يرجى المحاولة لاحقاً."
         )
         return ORDER_CATEGORY
+
 
 
 
@@ -2716,66 +2719,6 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 
-async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
-    user_id = update.effective_user.id
-
-    # استرجاع السلة من قاعدة البيانات
-    cart = await get_cart_from_db(user_id) or []
-
-    if not cart:
-        await update.callback_query.answer("❌ لا توجد وجبات في سلتك!")
-        return ORDER_MEAL
-
-    # حذف آخر وجبة مضافة
-    removed_item = cart.pop()
-    await save_cart_to_db(user_id, cart)
-    await asyncio.sleep(0.3)
-
-    # تحديث النسخة المحلية
-    context.user_data["orders"] = cart
-
-    # تحقق مزدوج من الحفظ
-    saved_cart = await get_cart_from_db(user_id)
-    if saved_cart != cart:
-        logger.warning(f"🔁 إعادة حفظ السلة بعد التناقض: user_id = {user_id}")
-        await save_cart_to_db(user_id, cart)
-
-    # تأكيد الحذف للمستخدم
-    await update.callback_query.answer(
-        f"✅ تم حذف آخر لمسة من الوجبة: {removed_item['name']} ({removed_item['size']})"
-    )
-
-    # إعداد ملخص جديد
-    summary_counter = defaultdict(int)
-    for item in cart:
-        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
-        summary_counter[label] += 1
-
-    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-    summary_text = "\n".join(summary_lines)
-    total_price = sum(item['price'] for item in cart)
-
-    # حذف رسالة الملخص السابقة إن وُجدت
-    old_msg_id = context.user_data.get("last_summary_message_id")
-    if old_msg_id:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg_id)
-        except:
-            pass
-
-    # إرسال رسالة الملخص الجديدة
-    try:
-        new_msg = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
-                 f"💰 المجموع: {total_price} ل.س\n"
-                 "عندما تنتهي اختر ✅ تم من الأسفل"
-        )
-        context.user_data["last_summary_message_id"] = new_msg.message_id
-    except Exception as e:
-        logger.warning(f"❌ فشل في إرسال ملخص الطلب بعد الحذف: {e}")
-
-    return ORDER_MEAL
 
 
 
@@ -5248,7 +5191,7 @@ conv_handler = ConversationHandler(
         ],
         ORDER_MEAL: [
             CallbackQueryHandler(handle_add_meal_with_size, pattern="^add_meal_with_size:"),
-            CallbackQueryHandler(handle_remove_last_meal, pattern="^remove_last_meal$"),
+            #CallbackQueryHandler(handle_remove_last_meal, pattern="^remove_last_meal$"),
             CallbackQueryHandler(handle_remove_specific_meal, pattern="^remove_specific_meal:"),
             CallbackQueryHandler(handle_done_adding_meals, pattern="^done_adding_meals$"),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
@@ -5414,3 +5357,75 @@ def run_user_bot () :
 
 if __name__ == "__main__":
     run_user_bot()
+
+
+
+
+
+
+
+
+
+
+
+
+async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
+    user_id = update.effective_user.id
+
+    # استرجاع السلة من قاعدة البيانات
+    cart = await get_cart_from_db(user_id) or []
+
+    if not cart:
+        await update.callback_query.answer("❌ لا توجد وجبات في سلتك!")
+        return ORDER_MEAL
+
+    # حذف آخر وجبة مضافة
+    removed_item = cart.pop()
+    await save_cart_to_db(user_id, cart)
+    await asyncio.sleep(0.3)
+
+    # تحديث النسخة المحلية
+    context.user_data["orders"] = cart
+
+    # تحقق مزدوج من الحفظ
+    saved_cart = await get_cart_from_db(user_id)
+    if saved_cart != cart:
+        logger.warning(f"🔁 إعادة حفظ السلة بعد التناقض: user_id = {user_id}")
+        await save_cart_to_db(user_id, cart)
+
+    # تأكيد الحذف للمستخدم
+    await update.callback_query.answer(
+        f"✅ تم حذف آخر لمسة من الوجبة: {removed_item['name']} ({removed_item['size']})"
+    )
+
+    # إعداد ملخص جديد
+    summary_counter = defaultdict(int)
+    for item in cart:
+        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
+        summary_counter[label] += 1
+
+    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
+    summary_text = "\n".join(summary_lines)
+    total_price = sum(item['price'] for item in cart)
+
+    # حذف رسالة الملخص السابقة إن وُجدت
+    old_msg_id = context.user_data.get("last_summary_message_id")
+    if old_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg_id)
+        except:
+            pass
+
+    # إرسال رسالة الملخص الجديدة
+    try:
+        new_msg = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
+                 f"💰 المجموع: {total_price} ل.س\n"
+                 "عندما تنتهي اختر ✅ تم من الأسفل"
+        )
+        context.user_data["last_summary_message_id"] = new_msg.message_id
+    except Exception as e:
+        logger.warning(f"❌ فشل في إرسال ملخص الطلب بعد الحذف: {e}")
+
+    return ORDER_MEAL
