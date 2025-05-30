@@ -2710,7 +2710,7 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 
-async def handle_remove_last_meal(update: Update, context: CallbackContext) -> None:
+async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
 
@@ -2729,15 +2729,15 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> N
             meal_name = lines[0].replace("🍽️", "").strip()
 
     if not meal_name:
-        await query.edit_message_text("❌ لم نتمكن من تحديد اسم الوجبة.")
-        return
+        await query.message.reply_text("❌ لم نتمكن من تحديد اسم الوجبة.")
+        return ORDER_MEAL
 
     # تحميل السلة من قاعدة البيانات
-    cart = await get_user_cart(user_id)
+    cart = await get_cart_from_db(user_id)
 
     if not cart:
-        await query.edit_message_text("❌ السلة فارغة حالياً.")
-        return
+        await query.message.reply_text("❌ السلة فارغة حالياً.")
+        return ORDER_MEAL
 
     # البحث عن آخر عنصر بنفس اسم الوجبة
     index_to_remove = None
@@ -2747,21 +2747,41 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> N
             break
 
     if index_to_remove is None:
-        await query.edit_message_text("❌ لم تقم بإضافة شيء من هذه الوجبة بعد.")
-        return
+        await query.message.reply_text("❌ لم تضف شيئًا من هذه الوجبة بعد.")
+        return ORDER_MEAL
 
     # حذف اللمسة الأخيرة المطابقة
     removed = cart.pop(index_to_remove)
-    await save_user_cart(user_id, cart)
+    await save_cart_to_db(user_id, cart)
 
-    # عرض ملخص جديد
-    summary = build_cart_summary(cart)
-    await query.edit_message_text(
-        f"✅ تم حذف آخر لمسة من الوجبة: {removed['name']} ({removed.get('size', 'default')})\n\n📦 ملخص طلبك الآن:\n{summary}",
+    # حذف الرسالة القديمة التي تحتوي على الملخص (إن وُجدت)
+    old_summary_id = context.user_data.get("last_cart_summary_id")
+    if old_summary_id:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_summary_id)
+        except:
+            pass
+
+    # بناء ملخص جديد
+    summary_lines = [f"- {item['name']} ({item.get('size', 'default')}) - {item['price']} ل.س" for item in cart]
+    summary_text = "\n".join(summary_lines) if summary_lines else "🧺 سلتك فارغة حالياً."
+    total = sum(item["price"] for item in cart)
+
+    # إرسال ملخص جديد وتخزين معرف الرسالة
+    new_summary = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            f"✅ تم حذف آخر لمسة من الوجبة: {removed['name']} ({removed.get('size', 'default')})\n\n"
+            f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
+            f"💰 المجموع: {total} ل.س"
+        ),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")]
         ])
     )
+    context.user_data["last_cart_summary_id"] = new_summary.message_id
+
+    return ORDER_MEAL
 
 
 
