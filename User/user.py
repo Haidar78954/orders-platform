@@ -2786,7 +2786,7 @@ async def handle_remove_specific_meal(update: Update, context: CallbackContext) 
     
     try:
         # استخراج معلومات الوجبة من callback_data
-        _, meal_id_str, size = query.data.split(":")
+        _, meal_id_str, _ = query.data.split(":")
         meal_id = int(meal_id_str)
         
         # استرجاع السلة من قاعدة البيانات
@@ -2796,23 +2796,24 @@ async def handle_remove_specific_meal(update: Update, context: CallbackContext) 
             await query.answer("❌ لا توجد وجبات في سلتك!")
             return ORDER_MEAL
         
-        # البحث عن الوجبة المطابقة في السلة
-        removed = False
-        meal_name = ""
-        
         # استرجاع اسم الوجبة من قاعدة البيانات
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("SELECT name FROM meals WHERE id = %s", (meal_id,))
                 result = await cursor.fetchone()
-                if result:
-                    meal_name = result[0]
+                if not result:
+                    await query.answer("❌ لم يتم العثور على الوجبة!")
+                    return ORDER_MEAL
+                meal_name = result[0]
         
-        # البحث عن الوجبة في السلة وحذفها
-        for i, item in enumerate(cart):
-            # التحقق من تطابق الوجبة (الاسم والحجم)
-            if (meal_name and item.get('name') == meal_name and item.get('size') == size) or \
-               (not meal_name and str(item.get('meal_id', '')) == meal_id_str and item.get('size') == size):
+        # البحث عن آخر وجبة مطابقة في السلة (من النهاية إلى البداية)
+        removed = False
+        removed_item = None
+        
+        # البحث من النهاية للبداية للعثور على آخر وجبة مطابقة
+        for i in range(len(cart) - 1, -1, -1):
+            item = cart[i]
+            if item.get('name') == meal_name or item.get('meal_id') == meal_id:
                 removed_item = cart.pop(i)
                 removed = True
                 break
@@ -2823,13 +2824,15 @@ async def handle_remove_specific_meal(update: Update, context: CallbackContext) 
         
         # حفظ السلة المحدثة
         await save_cart_to_db(user_id, cart)
+        await asyncio.sleep(0.3)  # تأخير صغير للتأكد من حفظ البيانات
         
         # تحديث النسخة المحلية
         context.user_data["orders"] = cart
         context.user_data["cart"] = cart
         
         # تأكيد الحذف للمستخدم
-        await query.answer(f"✅ تم حذف: {removed_item.get('name')} ({removed_item.get('size')})")
+        size_text = f" ({removed_item.get('size')})" if removed_item.get('size') != "default" else ""
+        await query.answer(f"✅ تم حذف: {removed_item.get('name')}{size_text}")
         
         # إعداد ملخص جديد
         summary_counter = defaultdict(int)
@@ -2915,29 +2918,42 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
                 sizes = []
 
             buttons = []
+
             if sizes:
-                buttons.append([
-                    InlineKeyboardButton(
-                        f"{opt['name']} - {opt['price']} ل.س",
-                        callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
-                    ) for opt in sizes
-                ])
+                # أزرار الأحجام في صفوف بحد أقصى 2 في كل صف
+                size_buttons = []
+                for opt in sizes:
+                    size_buttons.append(
+                        InlineKeyboardButton(
+                            f"{opt['name']} - {opt['price']} ل.س",
+                            callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
+                        )
+                    )
+                for i in range(0, len(size_buttons), 2):
+                    buttons.append(size_buttons[i:i+2])
             else:
                 buttons.append([
                     InlineKeyboardButton(f"➕ أضف للسلة ({price} ل.س)", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
+
+            # زر حذف اللمسة الأخيرة مرتبط بهذه الوجبة فقط
             buttons.append([
-                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal"),
+                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"remove_specific_meal:{meal_id}:last")
+            ])
+
+            # زر "تم"
+            buttons.append([
                 InlineKeyboardButton("✅ تم", callback_data="done_adding_meals")
             ])
+
             reply_markup = InlineKeyboardMarkup(buttons)
 
             # 🧠 بناء النص
             caption_text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
             caption_text += f"\n💰 السعر: {price} ل.س" if price else ""
 
-            if image_file_id:
-                try:
+            try:
+                if image_file_id:
                     if image_file_id.startswith("AgAC"):  # file_id مباشر
                         photo_msg = await context.bot.send_photo(
                             chat_id=update.effective_chat.id,
@@ -2955,7 +2971,6 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
                         )
                         meal_messages.append(copied.message_id)
 
-                        # إرسال الاسم والكابشن والزر بشكل منفصل
                         txt = await context.bot.send_message(
                             chat_id=update.effective_chat.id,
                             text=caption_text,
@@ -2963,16 +2978,15 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
                             parse_mode="HTML"
                         )
                         meal_messages.append(txt.message_id)
-
-                except Exception as e:
-                    logger.error(f"❌ خطأ أثناء عرض {name}: {e}")
+                else:
                     txt = await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=caption_text,
                         reply_markup=reply_markup
                     )
                     meal_messages.append(txt.message_id)
-            else:
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء عرض {name}: {e}")
                 txt = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=caption_text,
@@ -2985,7 +2999,6 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
     except Exception as e:
         logger.error(f"❌ خطأ في show_meals_in_category: {e}", exc_info=True)
         await update.message.reply_text("❌ حدث خطأ أثناء تحميل الوجبات. حاول لاحقاً.")
-
 
 
 
@@ -5236,6 +5249,7 @@ conv_handler = ConversationHandler(
         ORDER_MEAL: [
             CallbackQueryHandler(handle_add_meal_with_size, pattern="^add_meal_with_size:"),
             CallbackQueryHandler(handle_remove_last_meal, pattern="^remove_last_meal$"),
+            CallbackQueryHandler(handle_remove_specific_meal, pattern="^remove_specific_meal:"),
             CallbackQueryHandler(handle_done_adding_meals, pattern="^done_adding_meals$"),
             MessageHandler(filters.Regex("^القائمة الرئيسية 🪧$"), return_to_main_menu),
             MessageHandler(filters.Regex("^تم ✅$"), handle_done_adding_meals),
@@ -5378,7 +5392,6 @@ def run_user_bot () :
     application.add_handler(CallbackQueryHandler(handle_faq_response, pattern="^faq_(refusal|eta|issue|ban|no_delivery|repeat_cancel)$"))
     application.add_handler(CallbackQueryHandler(handle_faq_back, pattern="^faq_back$"))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_vip_broadcast_message))
-    application.add_handler(CallbackQueryHandler(handle_remove_specific_meal, pattern="^remove_specific_meal:"))
 
     application.add_handler(CallbackQueryHandler(explain_location_instruction, pattern="^how_to_send_location$"))
     application.add_handler(CallbackQueryHandler(handle_order_flow_help, pattern="^help_with_order_flow$"))
