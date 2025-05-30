@@ -2712,44 +2712,43 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
+    callback_data = update.callback_query.data  # مثل: delete_بيتزا دجاج (وسط)
+    meal_with_size = callback_data.replace("delete_", "").strip()
 
-    # استرجاع السلة من قاعدة البيانات
+    # محاولة استخراج الاسم والقياس
+    try:
+        meal_name, meal_size = meal_with_size.rsplit("(", 1)
+        meal_name = meal_name.strip()
+        meal_size = meal_size.replace(")", "").strip()
+    except ValueError:
+        await update.callback_query.answer("❌ صيغة غير صحيحة للوجبة.")
+        return ORDER_MEAL
+
+    # استرجاع السلة
     cart = await get_cart_from_db(user_id) or []
 
     if not cart:
         await update.callback_query.answer("❌ لا توجد وجبات في سلتك!")
         return ORDER_MEAL
 
-    # حذف آخر وجبة مضافة
-    removed_item = cart.pop()
-    await save_cart_to_db(user_id, cart)
-    await asyncio.sleep(0.3)
+    # حذف آخر عنصر يطابق الاسم والقياس
+    found = False
+    for i in range(len(cart) - 1, -1, -1):  # نبدأ من الأخير
+        item = cart[i]
+        if item["name"] == meal_name and item["size"] == meal_size:
+            removed_item = cart.pop(i)
+            found = True
+            break
 
-    # تحديث النسخة المحلية
+    if not found:
+        await update.callback_query.answer("❌ لم تضف شيئًا من هذه الوجبة بعد.")
+        return ORDER_MEAL
+
+    # حفظ السلة وتحديث النسخة المحلية
+    await save_cart_to_db(user_id, cart)
     context.user_data["orders"] = cart
 
-    # تحقق مزدوج من الحفظ
-    saved_cart = await get_cart_from_db(user_id)
-    if saved_cart != cart:
-        logger.warning(f"🔁 إعادة حفظ السلة بعد التناقض: user_id = {user_id}")
-        await save_cart_to_db(user_id, cart)
-
-    # تأكيد الحذف للمستخدم
-    await update.callback_query.answer(
-        f"✅ تم حذف آخر لمسة من الوجبة: {removed_item['name']} ({removed_item['size']})"
-    )
-
-    # إعداد ملخص جديد
-    summary_counter = defaultdict(int)
-    for item in cart:
-        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
-        summary_counter[label] += 1
-
-    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-    summary_text = "\n".join(summary_lines)
-    total_price = sum(item['price'] for item in cart)
-
-    # حذف رسالة الملخص السابقة إن وُجدت
+    # حذف رسالة الملخص السابقة
     old_msg_id = context.user_data.get("last_summary_message_id")
     if old_msg_id:
         try:
@@ -2757,17 +2756,26 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
         except:
             pass
 
-    # إرسال رسالة الملخص الجديدة
-    try:
-        new_msg = await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
-                 f"💰 المجموع: {total_price} ل.س\n"
-                 "عندما تنتهي اختر ✅ تم من الأسفل"
-        )
-        context.user_data["last_summary_message_id"] = new_msg.message_id
-    except Exception as e:
-        logger.warning(f"❌ فشل في إرسال ملخص الطلب بعد الحذف: {e}")
+    # إعداد ملخص جديد
+    summary_counter = defaultdict(int)
+    for item in cart:
+        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
+        summary_counter[label] += 1
+    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
+    summary_text = "\n".join(summary_lines)
+    total_price = sum(item['price'] for item in cart)
+
+    # تأكيد الحذف
+    await update.callback_query.answer(f"✅ تم حذف آخر لمسة من الوجبة: {meal_name} ({meal_size})")
+
+    # إرسال الملخص الجديد
+    new_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
+             f"💰 المجموع: {total_price} ل.س\n"
+             "عندما تنتهي اختر ✅ تم من الأسفل"
+    )
+    context.user_data["last_summary_message_id"] = new_msg.message_id
 
     return ORDER_MEAL
 
