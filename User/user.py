@@ -2394,9 +2394,14 @@ async def handle_missing_restaurant(update: Update, context: CallbackContext) ->
         return SELECT_RESTAURANT
 
 
+
+
+
+
 async def handle_order_category(update: Update, context: CallbackContext) -> int:
     return await process_category_selection(update, context)
-    
+
+
 async def process_category_selection(update: Update, context: CallbackContext) -> int:
     category_name = update.message.text
     logger.info(f"📥 اختار المستخدم الفئة: {category_name}")
@@ -2426,7 +2431,6 @@ async def process_category_selection(update: Update, context: CallbackContext) -
     context.user_data['selected_category_id'] = category_id
     context.user_data['selected_category_name'] = category_name
 
-    # حذف الرسائل القديمة
     for msg_id in context.user_data.get("current_meal_messages", []):
         try:
             await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
@@ -2466,18 +2470,23 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
             buttons = []
             if size_options:
-                size_buttons = [
-                    InlineKeyboardButton(f"{opt['name']}\n{opt['price']}", callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}")
-                    for opt in size_options
-                ]
-                buttons.append(size_buttons)
+                for opt in size_options:
+                    add_btn = InlineKeyboardButton(
+                        f"{opt['name']}\n{opt['price']}",
+                        callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
+                    )
+                    delete_btn = InlineKeyboardButton(
+                        "❌ حذف اللمسة الأخيرة",
+                        callback_data=f"delete_{name} ({opt['name']})"
+                    )
+                    buttons.append([add_btn, delete_btn])
             else:
                 buttons.append([
                     InlineKeyboardButton("🛒 أضف إلى السلة", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
-            buttons.append([
-                InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")
-            ])
+                buttons.append([
+                    InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"delete_{name} (default)")
+                ])
             reply_markup = InlineKeyboardMarkup(buttons)
 
             caption_text = f"🍽️ {name}\n\n{caption}" if caption else f"🍽️ {name}"
@@ -2495,21 +2504,18 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                     )
                     context.user_data["current_meal_messages"].append(photo_msg.message_id)
                 else:
-                    # fallback إلى copy_message بدون caption
                     copied = await context.bot.copy_message(
                         chat_id=update.effective_chat.id,
                         from_chat_id=ADMIN_MEDIA_CHANNEL,
                         message_id=int(image_file_id),
                         reply_markup=reply_markup
                     )
-                    # إرسال الكابشن كنص منفصل
                     caption_msg = await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=caption_text,
                         reply_markup=reply_markup
                     )
                     context.user_data["current_meal_messages"] += [copied.message_id, caption_msg.message_id]
-
             except Exception as e:
                 logger.error(f"❌ فشل في عرض الوجبة '{name}': {e}")
                 msg = await context.bot.send_message(
@@ -2519,7 +2525,6 @@ async def process_category_selection(update: Update, context: CallbackContext) -
                 )
                 context.user_data["current_meal_messages"].append(msg.message_id)
 
-        # قائمة الفئات للعودة
         categories = list(category_map.keys())
         keyboard = [[cat] for cat in categories]
         keyboard.append(["تم ✅", "القائمة الرئيسية 🪧"])
