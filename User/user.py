@@ -2707,71 +2707,62 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 
+
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-    meal_with_size = update.callback_query.data.replace("delete_", "")
-    
+    meal_with_size = update.callback_query.data.replace("delete_", "").strip().lower()
+
     # استرجاع السلة الحالية
     cart = await get_cart_from_db(user_id) or []
-    
+
     if not cart:
         await update.callback_query.answer("❌ لا توجد وجبات في سلتك!")
         return ORDER_MEAL
-    
+
     # البحث عن الوجبة المراد حذفها
     found = False
     cart_after_deletion = []
-    
+
     for item in cart:
-        item_label = f"{item['name']} ({item['size']})"
-        if item_label == meal_with_size and not found:
+        item_label = f"{item['name']} ({item['size']})" if item.get("size") != "default" else item["name"]
+        if item_label.strip().lower() == meal_with_size and not found:
             found = True
             continue
         cart_after_deletion.append(item)
-    
+
     if not found:
         await update.callback_query.answer("❌ لم يتم العثور على الوجبة!")
         return ORDER_MEAL
-    
+
     # حفظ السلة بعد الحذف
     await save_cart_to_db(user_id, cart_after_deletion)
-    
-    # إضافة تأخير قصير للتأكد من اكتمال عملية الحفظ
     await asyncio.sleep(0.5)
-    
-    # تحديث السلة في context.user_data مباشرة
     context.user_data['orders'] = cart_after_deletion
-    
-    # إضافة تأكيد إضافي للتحقق من الحفظ
+
+    # تأكيد التحديث
     saved_cart = await get_cart_from_db(user_id)
     if saved_cart != cart_after_deletion:
         logger.error(f"❌ تناقض في البيانات بعد الحذف: المحفوظ {saved_cart} مقابل المتوقع {cart_after_deletion}")
-        # محاولة إعادة الحفظ
         await save_cart_to_db(user_id, cart_after_deletion)
-    
-    # عرض رسالة تأكيد الحذف
+
+    # عرض رسالة تأكيد
     await update.callback_query.answer(f"✅ تم حذف آخر لمسة من الوجبة: {meal_with_size}")
-    
-    # حساب المجموع الجديد
+
+    # إعداد ملخص
     total_price = sum(item['price'] for item in cart_after_deletion)
-    
-    # إعداد ملخص الطلب
     summary_counter = defaultdict(int)
     for item in cart_after_deletion:
         label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
         summary_counter[label] += 1
-    
     summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
     summary_text = "\n".join(summary_lines)
-    
-    # إرسال ملخص محدث
+
     await update.callback_query.edit_message_text(
         f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
         f"💰 المجموع: {total_price} ل.س\n"
         "عندما تنتهي اختر ✅ تم من الأسفل"
     )
-    
-    return ORDER_MEAL
+
 
 
 
@@ -3212,10 +3203,11 @@ async def handle_new_location(update: Update, context: CallbackContext) -> int:
 
 
 async def ask_new_area_name(update: Update, context: CallbackContext) -> int:
-    if update.message.text == "عودة ➡️":
+    # لا نستخدم text مباشرة لأنها قد لا تكون موجودة بعد إرسال الموقع
+    if update.message.text and update.message.text == "عودة ➡️":
         return await ask_order_location(update, context)
 
-    context.user_data['temporary_area_name'] = update.message.text.strip()
+    context.user_data['temporary_area_name'] = update.message.text.strip() if update.message.text else "غير محدد"
 
     await update.message.reply_text(
         "✏️ الآن، تخيّل أنك تحكي مع المطعم وتريد أن تحدد له مكانك تمامًا.\n"
@@ -3223,6 +3215,7 @@ async def ask_new_area_name(update: Update, context: CallbackContext) -> int:
         reply_markup=ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
     )
     return ASK_NEW_DETAILED_LOCATION
+
 
 
 
