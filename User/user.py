@@ -2566,7 +2566,6 @@ async def test_copy_image(update: Update, context: CallbackContext):
 
 
 
-
 async def handle_add_meal_with_size(update: Update, context: CallbackContext) -> int:
     logger.warning("🔥 تم الضغط على زر إضافة وجبة.")
     logger.warning(f"📍 context.user_data['conversation_state'] = {context.user_data.get('conversation_state')}")
@@ -2576,15 +2575,12 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
     logger.info(f"⬇️ تم الضغط على الزر: {query.data}")
 
     try:
-        logger.debug("📦 بدأ تحليل callback_data")
         _, meal_id_str, size = query.data.split(":")
         meal_id = int(meal_id_str)
         user_id = update.effective_user.id
-        logger.debug(f"📍 meal_id: {meal_id}, size: {size}, user_id: {user_id}")
 
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                logger.debug("🔍 استعلام قاعدة البيانات لجلب معلومات الوجبة...")
                 await cursor.execute("""
                     SELECT name, price, size_options
                     FROM meals
@@ -2593,7 +2589,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                 result = await cursor.fetchone()
 
                 if not result:
-                    logger.warning(f"❌ لم يتم العثور على وجبة بالمعرف {meal_id}")
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
                         text="❌ لم يتم العثور على الوجبة."
@@ -2601,7 +2596,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     return ORDER_MEAL
 
                 meal_name, base_price, size_options_json = result
-                logger.debug(f"✅ تم العثور على الوجبة: {meal_name}, السعر الأساسي: {base_price}")
 
                 try:
                     size_options = json.loads(size_options_json or "[]")
@@ -2624,14 +2618,20 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
 
                 logger.info(f"🛒 item_data المحضر للإضافة إلى السلة: {item_data}")
 
-                logger.warning("🚧 سيتم الآن استدعاء add_item_to_cart")
-                orders, total_price = await add_item_to_cart(user_id, item_data, context)  # ✅ التعديل هنا
-                logger.warning("✅ add_item_to_cart تم تنفيذه بنجاح")
-
+                # ✅ إضافة للسلة
+                orders, total_price = await add_item_to_cart(user_id, item_data, context)
                 context.user_data["orders"] = orders
                 context.user_data["temporary_total_price"] = total_price
-                logger.debug(f"✅ تمت الإضافة للسلة. إجمالي السعر: {total_price}")
 
+                # 🧹 حذف رسالة الملخص السابقة إن وجدت
+                msg_id = context.user_data.pop("summary_msg_id", None)
+                if msg_id:
+                    try:
+                        await context.bot.delete_message(update.effective_chat.id, msg_id)
+                    except:
+                        pass
+
+                # 📝 بناء ملخص جديد
                 summary_counter = defaultdict(int)
                 for item in orders:
                     label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
@@ -2646,14 +2646,6 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
                     f"💰 المجموع: {total_price} ل.س\n"
                     f"عندما تنتهي اختر ✅ تم من الأسفل"
                 )
-
-                msg_id = context.user_data.get("summary_msg_id")
-                if msg_id:
-                    try:
-                        await context.bot.delete_message(update.effective_chat.id, msg_id)
-                        logger.debug("🧹 تم حذف الملخص السابق بنجاح")
-                    except Exception as e:
-                        logger.warning(f"⚠️ فشل حذف الملخص السابق: {e}")
 
                 msg = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
@@ -2672,6 +2664,7 @@ async def handle_add_meal_with_size(update: Update, context: CallbackContext) ->
             text="❌ حدث خطأ أثناء إضافة الوجبة. حاول لاحقاً."
         )
         return ORDER_MEAL
+
 
 
 
@@ -2750,38 +2743,43 @@ async def handle_remove_last_meal(update: Update, context: CallbackContext) -> i
         await query.message.reply_text("❌ لم تضف شيئًا من هذه الوجبة بعد.")
         return ORDER_MEAL
 
-    # حذف اللمسة الأخيرة المطابقة
+    # حذف العنصر المستهدف
     removed = cart.pop(index_to_remove)
     await save_cart_to_db(user_id, cart)
 
-    # حذف الرسالة القديمة التي تحتوي على الملخص (إن وُجدت)
-    old_summary_id = context.user_data.get("last_cart_summary_id")
-    if old_summary_id:
+    # 🧹 حذف رسالة الملخص السابقة إن وُجدت
+    msg_id = context.user_data.pop("summary_msg_id", None)
+    if msg_id:
         try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_summary_id)
+            await context.bot.delete_message(update.effective_chat.id, msg_id)
         except:
             pass
 
     # بناء ملخص جديد
-    summary_lines = [f"- {item['name']} ({item.get('size', 'default')}) - {item['price']} ل.س" for item in cart]
+    summary_counter = defaultdict(int)
+    for item in cart:
+        label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
+        summary_counter[label] += 1
+
+    summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
     summary_text = "\n".join(summary_lines) if summary_lines else "🧺 سلتك فارغة حالياً."
     total = sum(item["price"] for item in cart)
 
-    # إرسال ملخص جديد وتخزين معرف الرسالة
-    new_summary = await context.bot.send_message(
+    # إرسال ملخص جديد
+    msg = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=(
             f"✅ تم حذف آخر لمسة من الوجبة: {removed['name']} ({removed.get('size', 'default')})\n\n"
             f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
-            f"💰 المجموع: {total} ل.س"
-        ),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data="remove_last_meal")]
-        ])
+            f"💰 المجموع: {total} ل.س\n"
+            f"عندما تنتهي اختر ✅ تم من الأسفل"
+        )
     )
-    context.user_data["last_cart_summary_id"] = new_summary.message_id
+    context.user_data["summary_msg_id"] = msg.message_id
+    await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
 
     return ORDER_MEAL
+
 
 
 
@@ -3270,7 +3268,11 @@ async def process_confirm_final_order(update, context):
 
     if choice == "يالله عالسريع 🔥":
         user_state = await get_conversation_state(user_id)
-        cart = await get_cart_from_db(user_id) or {}
+        cart = await get_cart_from_db(user_id) or []
+
+        if not cart:
+            await update.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
+            return MAIN_MENU
 
         order_id = str(uuid.uuid4())
         name = user_state.get('name', context.user_data.get('name', 'غير متوفر'))
@@ -3279,15 +3281,7 @@ async def process_confirm_final_order(update, context):
         location_coords = user_state.get('temporary_location_coords', user_state.get('location_coords', {}))
         location_text = user_state.get('temporary_location_text', user_state.get('location_text', 'غير متوفر'))
 
-        orders = json.loads(cart.get('orders', '[]'))
-        if not orders and 'orders' in context.user_data:
-            orders = context.user_data['orders']
-
-        if not orders:
-            await update.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
-            return MAIN_MENU
-
-        selected_restaurant = cart.get('selected_restaurant', context.user_data.get('selected_restaurant', ''))
+        selected_restaurant = context.user_data.get('selected_restaurant')
         if not selected_restaurant:
             await update.message.reply_text("❌ لم يتم تحديد المطعم.")
             return MAIN_MENU
@@ -3336,9 +3330,9 @@ async def process_confirm_final_order(update, context):
 
                 await conn.commit()
 
-            # ✅ تنسيق الطلبات حسب البنود الموحدة
+            # ✅ ترتيب الطلبات لتجميع الكميات
             summary_counter = defaultdict(int)
-            for item in orders:
+            for item in cart:
                 key = (item['name'], item['size'], item['price'])
                 summary_counter[key] += 1
 
@@ -3353,7 +3347,7 @@ async def process_confirm_final_order(update, context):
 
             total_price = sum(item['price'] * item['quantity'] for item in items_for_message)
 
-            # ✅ إنشاء الرسالة بالتنسيق الموحد
+            # 🧾 إنشاء نص الطلب
             order_text = create_new_order_message(
                 order_id=order_id,
                 order_number=order_number,
@@ -3404,7 +3398,7 @@ async def process_confirm_final_order(update, context):
             return MAIN_MENU
 
         except Exception as e:
-            logger.error(f"❌ خطأ أثناء تأكيد الطلب: {e}")
+            logger.error(f"❌ خطأ أثناء تأكيد الطلب: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تأكيد الطلب. حاول لاحقاً.")
             return MAIN_MENU
 
@@ -3422,6 +3416,7 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
+
 
 
 
