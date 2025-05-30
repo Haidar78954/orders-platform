@@ -534,34 +534,33 @@ async def save_cart_to_db(user_id, cart_data):
 
 
 async def get_cart_from_db(user_id):
-    user_id = int(user_id)
-    await asyncio.sleep(0.1)  # تأخير بسيط قبل القراءة
     logger.warning(f"🧠 [get_cart_from_db] user_id = {user_id}, type = {type(user_id)}")
     try:
         # تأكد من أن user_id هو integer
         user_id = int(user_id)
         
+        # زيادة التأخير قبل القراءة لضمان اكتمال عمليات الكتابة السابقة
+        await asyncio.sleep(0.3)
+        
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
-                # إضافة تأخير صغير للتأكد من اكتمال عملية الحفظ السابقة
-                await asyncio.sleep(0.1)
-                
-                await cursor.execute("SELECT cart_data FROM shopping_carts WHERE user_id = %s", (user_id,))
+                await cursor.execute(
+                    "SELECT cart_data FROM shopping_carts WHERE user_id = %s",
+                    (user_id,)
+                )
                 result = await cursor.fetchone()
-                logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
-
+                
                 if result and result[0]:
                     cart_data = result[0]
                     if isinstance(cart_data, bytes):
                         cart_data = cart_data.decode("utf-8")
                     cart = json.loads(cart_data)
+                    logger.warning(f"📤 [get_cart_from_db] نتيجة: {result}")
                     logger.warning(f"✅ تم تحويل JSON: {cart}")
                     return cart
-                else:
-                    logger.warning(f"⚠️ لا توجد سلة محفوظة للمستخدم {user_id} (نوع: {type(user_id)})")
-                    return []
+                return []
     except Exception as e:
-        logger.error(f"❌ خطأ أثناء استرجاع السلة من قاعدة البيانات: {e}", exc_info=True)
+        logger.error(f"❌ خطأ في get_cart_from_db: {e}")
         return []
 
 
@@ -2080,6 +2079,7 @@ async def handle_faq_back(update: Update, context: CallbackContext) -> None:
 async def handle_restaurant_selection(update: Update, context: CallbackContext) -> int:
     selected_option = update.message.text
     restaurant_map = context.user_data.get('restaurant_map', {})
+    user_id = update.effective_user.id
 
     if selected_option == "مطعمي المفضل وينو ؟ 😕":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
@@ -2121,6 +2121,10 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
         # ✅ تخزين المطعم والمتابعة
         context.user_data["selected_restaurant_id"] = restaurant_id
         context.user_data["selected_restaurant_name"] = restaurant_name
+        context.user_data["selected_restaurant"] = restaurant_name
+        
+        # حفظ المطعم المختار في حالة المحادثة أيضاً
+        await update_conversation_state(user_id, 'selected_restaurant', restaurant_name)
 
         await show_restaurant_categories(update, context)  # ← تعرض الفئات
         return ORDER_CATEGORY  # ← تحدد المرحلة القادمة
@@ -2704,80 +2708,69 @@ async def add_item_to_cart(user_id: int, item_data: dict, context: CallbackConte
 
 
 async def handle_remove_last_meal(update: Update, context: CallbackContext) -> int:
-    query = update.callback_query
-    await query.answer()
-
-    message = query.message
     user_id = update.effective_user.id
-
-    # استخراج اسم الوجبة من الكابشن أو النص
-    meal_name = None
-    if message.caption:
-        lines = message.caption.splitlines()
-        if lines:
-            meal_name = lines[0].replace("🍽️", "").strip()
-    elif message.text:
-        lines = message.text.splitlines()
-        if lines:
-            meal_name = lines[0].replace("🍽️", "").strip()
-
-    if not meal_name:
-        await query.message.reply_text("❌ لم نتمكن من تحديد اسم الوجبة.")
-        return ORDER_MEAL
-
-    # تحميل السلة من قاعدة البيانات
-    cart = await get_cart_from_db(user_id)
-
+    meal_with_size = update.callback_query.data.replace("delete_", "")
+    
+    # استرجاع السلة الحالية
+    cart = await get_cart_from_db(user_id) or []
+    
     if not cart:
-        await query.message.reply_text("❌ السلة فارغة حالياً.")
+        await update.callback_query.answer("❌ لا توجد وجبات في سلتك!")
         return ORDER_MEAL
-
-    # البحث عن آخر عنصر بنفس اسم الوجبة
-    index_to_remove = None
-    for i in reversed(range(len(cart))):
-        if cart[i]["name"] == meal_name:
-            index_to_remove = i
-            break
-
-    if index_to_remove is None:
-        await query.message.reply_text("❌ لم تضف شيئًا من هذه الوجبة بعد.")
-        return ORDER_MEAL
-
-    # حذف العنصر المستهدف
-    removed = cart.pop(index_to_remove)
-    await save_cart_to_db(user_id, cart)
-
-    # 🧹 حذف رسالة الملخص السابقة إن وُجدت
-    msg_id = context.user_data.pop("summary_msg_id", None)
-    if msg_id:
-        try:
-            await context.bot.delete_message(update.effective_chat.id, msg_id)
-        except:
-            pass
-
-    # بناء ملخص جديد
-    summary_counter = defaultdict(int)
+    
+    # البحث عن الوجبة المراد حذفها
+    found = False
+    cart_after_deletion = []
+    
     for item in cart:
-        label = f"{item['name']} ({item['size']})" if item["size"] != "default" else item["name"]
+        item_label = f"{item['name']} ({item['size']})"
+        if item_label == meal_with_size and not found:
+            found = True
+            continue
+        cart_after_deletion.append(item)
+    
+    if not found:
+        await update.callback_query.answer("❌ لم يتم العثور على الوجبة!")
+        return ORDER_MEAL
+    
+    # حفظ السلة بعد الحذف
+    await save_cart_to_db(user_id, cart_after_deletion)
+    
+    # إضافة تأخير قصير للتأكد من اكتمال عملية الحفظ
+    await asyncio.sleep(0.5)
+    
+    # تحديث السلة في context.user_data مباشرة
+    context.user_data['orders'] = cart_after_deletion
+    
+    # إضافة تأكيد إضافي للتحقق من الحفظ
+    saved_cart = await get_cart_from_db(user_id)
+    if saved_cart != cart_after_deletion:
+        logger.error(f"❌ تناقض في البيانات بعد الحذف: المحفوظ {saved_cart} مقابل المتوقع {cart_after_deletion}")
+        # محاولة إعادة الحفظ
+        await save_cart_to_db(user_id, cart_after_deletion)
+    
+    # عرض رسالة تأكيد الحذف
+    await update.callback_query.answer(f"✅ تم حذف آخر لمسة من الوجبة: {meal_with_size}")
+    
+    # حساب المجموع الجديد
+    total_price = sum(item['price'] for item in cart_after_deletion)
+    
+    # إعداد ملخص الطلب
+    summary_counter = defaultdict(int)
+    for item in cart_after_deletion:
+        label = f"{item['name']} ({item['size']})" if item['size'] != "default" else item['name']
         summary_counter[label] += 1
-
+    
     summary_lines = [f"{count} × {label}" for label, count in summary_counter.items()]
-    summary_text = "\n".join(summary_lines) if summary_lines else "🧺 سلتك فارغة حالياً."
-    total = sum(item["price"] for item in cart)
-
-    # إرسال ملخص جديد
-    msg = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=(
-            f"✅ تم حذف آخر لمسة من الوجبة: {removed['name']} ({removed.get('size', 'default')})\n\n"
-            f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
-            f"💰 المجموع: {total} ل.س\n"
-            f"عندما تنتهي اختر ✅ تم من الأسفل"
-        )
+    summary_text = "\n".join(summary_lines)
+    
+    # إرسال ملخص محدث
+    await update.callback_query.edit_message_text(
+        f"📦 ملخص طلبك الآن:\n{summary_text}\n\n"
+        f"💰 المجموع: {total_price} ل.س\n"
+        "عندما تنتهي اختر ✅ تم من الأسفل"
     )
-    context.user_data["summary_msg_id"] = msg.message_id
-    await update_conversation_state(user_id, "summary_msg_id", msg.message_id)
-
+    
     return ORDER_MEAL
 
 
@@ -2999,21 +2992,76 @@ async def handle_order_notes(update: Update, context: CallbackContext) -> int:
     return ASK_ORDER_LOCATION
 
 
+async def emergency_order_recovery(user_id, context):
+    """استرجاع بيانات الطلب في حالات الطوارئ"""
+    try:
+        # محاولة استرجاع البيانات من قاعدة البيانات
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                # استرجاع آخر طلب للمستخدم
+                await cursor.execute("""
+                    SELECT r.name, c.cart_data 
+                    FROM restaurants r
+                    JOIN shopping_carts c ON 1=1
+                    WHERE c.user_id = %s
+                    ORDER BY c.updated_at DESC
+                    LIMIT 1
+                """, (user_id,))
+                result = await cursor.fetchone()
+                
+                if result:
+                    restaurant_name, cart_data = result
+                    context.user_data['selected_restaurant'] = restaurant_name
+                    
+                    if cart_data:
+                        if isinstance(cart_data, bytes):
+                            cart_data = cart_data.decode("utf-8")
+                        cart = json.loads(cart_data)
+                        context.user_data['orders'] = cart
+                        return True
+        
+        return False
+    except Exception as e:
+        logger.error(f"❌ خطأ في استرجاع بيانات الطلب في حالة الطوارئ: {e}")
+        return False
 
 
 async def ask_order_location(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
+    user_id = update.effective_user.id
+    
+    # استرجاع البيانات من قاعدة البيانات إذا لم تكن موجودة في context.user_data
     orders = context.user_data.get('orders', [])
+    if not orders:
+        orders = await get_cart_from_db(user_id)
+        context.user_data['orders'] = orders
+    
     selected_restaurant = context.user_data.get('selected_restaurant')
-
+    if not selected_restaurant:
+        # استرجاع اسم المطعم من قاعدة البيانات أو من حالة المحادثة
+        try:
+            state = await get_conversation_state(user_id)
+            selected_restaurant = state.get('selected_restaurant')
+            if selected_restaurant:
+                context.user_data['selected_restaurant'] = selected_restaurant
+        except Exception as e:
+            logger.error(f"❌ خطأ في استرجاع اسم المطعم: {e}")
+    
     # ✅ تصحيح الطلبات القديمة
     if isinstance(orders, dict):
         orders = await fixed_orders_from_legacy_dict(orders)
         context.user_data["orders"] = orders
 
     if choice == "نفس الموقع يلي عطيتكن ياه بالاول 🌝":
-        if not orders or not selected_restaurant:
-            await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب.")
+        # تحسين رسالة الخطأ وإضافة المزيد من المعلومات التشخيصية
+        if not orders:
+            logger.error(f"❌ لا توجد طلبات للمستخدم {user_id}")
+            await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب: لا توجد وجبات في السلة.")
+            return MAIN_MENU
+            
+        if not selected_restaurant:
+            logger.error(f"❌ لا يوجد مطعم محدد للمستخدم {user_id}")
+            await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب: لم يتم تحديد المطعم.")
             return MAIN_MENU
 
         total_price = sum(item.get("price", 0) for item in orders)
@@ -3056,7 +3104,6 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات.")
         return ASK_ORDER_LOCATION
-
 
 
 
@@ -3233,6 +3280,9 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
         area = context.user_data.get("temporary_area_name", "غير محدد")
         details = context.user_data.get("temporary_detailed_location", "غير محدد")
         location_text = f"🚚 رح نبعتلك طلبيتك عالسريع على:\n📍 {area}\n{details}"
+        
+        # حفظ النص المؤقت للموقع للاستخدام لاحقاً
+        context.user_data['temporary_location_text'] = f"{area} - {details}"
     else:
         location_text = "📍 الموقع الأساسي المسجل سابقاً"
 
