@@ -780,7 +780,7 @@ user_state_lock = {}  # قفل لكل مستخدم على حدة
 
 ADMIN_MEDIA_CHANNEL = -1002659459294  
 AD_MEDIA_CHANNEL = -1002315567913  # معرف القناة الوسيطة الإعلانية (بالسالب)
-ERRORS_CHANNEL = -1001234567890  # استبدله بمعرف قناتك
+ERRORS_CHANNEL = -1001234567890  
 
 
 
@@ -846,13 +846,13 @@ def get_main_menu():
 #_____________________________
 
 # دوال إنشاء الرسائل الموحدة
-def create_new_order_message(order_id, order_number, user_name, phone, address, items, total_price):
+def create_new_order_message(order_id, order_number, user_name, phone, address, items, total_price, notes=None):
     """إنشاء رسالة طلب جديد بالتنسيق الموحد"""
     
     # بناء قائمة الطلبات
     items_text = ""
     for i, item in enumerate(items, 1):
-        items_text += f"  {i}. {item['name']} x{item['quantity']} - {item['price']} ريال\n"
+        items_text += f"  {i}. {item['name']} x{item['quantity']} - {item['price']} ل.س\n"
     
     # بناء الرسالة الكاملة
     message = (
@@ -863,7 +863,8 @@ def create_new_order_message(order_id, order_number, user_name, phone, address, 
         f"📱 *رقم الهاتف:* {phone}\n"
         f"📍 *العنوان:* {address}\n\n"
         f"📋 *الطلبات:*\n{items_text}\n"
-        f"💰 *المجموع:* {total_price} ريال"
+        f"💰 *المجموع:* {total_price} ل.س\n\n"
+        f"📝 *ملاحظات:* {notes if notes else 'لا يوجد ملاحظات'}"
     )
     
     return message
@@ -884,7 +885,6 @@ def create_rating_message(order_id, order_number, rating, comment=None):
         message += f"💬 *التعليق:* {comment}"
     
     return message
-
 
 
 
@@ -3317,11 +3317,70 @@ async def process_confirm_final_order(update, context):
             return MAIN_MENU
 
         order_id = str(uuid.uuid4())
-        name = user_state.get('name', context.user_data.get('name', 'غير متوفر'))
-        phone = user_state.get('phone', context.user_data.get('phone', 'غير متوفر'))
+        # ✅ إصلاح منطق جلب اسم المستخدم
+        name = user_state.get('name', context.user_data.get('name'))
+        phone = user_state.get('phone', context.user_data.get('phone'))
+        
+        # إذا لم يكن الاسم متوفراً أو كان خاطئاً، جلبه من قاعدة البيانات
+        if not name or name == 'غير متوفر':
+            try:
+                async with get_db_connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
+                        result = await cursor.fetchone()
+                        
+                        if result:
+                            db_name, db_phone = result
+                            if db_name:
+                                name = db_name
+                            if db_phone and not phone:
+                                phone = db_phone
+            except Exception as e:
+                logger.error(f"خطأ في جلب اسم المستخدم من قاعدة البيانات: {e}")
+        
+        # التأكد من وجود قيم افتراضية
+        if not name:
+            name = 'غير متوفر'
+        if not phone:
+            phone = 'غير متوفر'
 
-        location_coords = user_state.get('temporary_location_coords', user_state.get('location_coords', {}))
-        location_text = user_state.get('temporary_location_text', user_state.get('location_text', 'غير متوفر'))
+        # ✅ إصلاح منطق جلب العنوان
+        # أولاً: التحقق من الموقع المؤقت
+        location_coords = user_state.get('temporary_location_coords')
+        location_text = user_state.get('temporary_location_text')
+        
+        # إذا لم يكن هناك موقع مؤقت، استخدم الموقع الأساسي
+        if not location_text or location_text == 'غير متوفر':
+            location_coords = user_state.get('location_coords', {})
+            location_text = user_state.get('location_text')
+        
+        # إذا لم يكن هناك نص موقع، جرب جلبه من قاعدة البيانات
+        if not location_text or location_text == 'غير متوفر':
+            try:
+                async with get_db_connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("""
+                            SELECT ud.location_text, c.name as city_name, p.name as province_name
+                            FROM user_data ud
+                            LEFT JOIN cities c ON ud.city_id = c.id
+                            LEFT JOIN provinces p ON ud.province_id = p.id
+                            WHERE ud.user_id = %s
+                        """, (user_id,))
+                        result = await cursor.fetchone()
+                        
+                        if result:
+                            db_location_text, city_name, province_name = result
+                            if db_location_text:
+                                location_text = db_location_text
+                            elif city_name and province_name:
+                                location_text = f"{city_name}, {province_name}"
+                            else:
+                                location_text = "الموقع غير محدد"
+                        else:
+                            location_text = "الموقع غير محدد"
+            except Exception as e:
+                logger.error(f"خطأ في جلب الموقع من قاعدة البيانات: {e}")
+                location_text = "الموقع غير محدد"
 
         selected_restaurant = context.user_data.get('selected_restaurant')
         if not selected_restaurant:
@@ -3389,6 +3448,9 @@ async def process_confirm_final_order(update, context):
 
             total_price = sum(item['price'] * item['quantity'] for item in items_for_message)
 
+            # 🧾 الحصول على الملاحظات من حالة المستخدم
+            notes = user_state.get('order_notes', None)
+
             # 🧾 إنشاء نص الطلب
             order_text = create_new_order_message(
                 order_id=order_id,
@@ -3397,17 +3459,20 @@ async def process_confirm_final_order(update, context):
                 phone=phone,
                 address=location_text,
                 items=items_for_message,
-                total_price=total_price
+                total_price=total_price,
+                notes=notes
             )
 
-            await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
-
+            # ✅ إرسال الموقع أولاً
             if location_coords and 'latitude' in location_coords and 'longitude' in location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
                     latitude=location_coords['latitude'],
                     longitude=location_coords['longitude']
                 )
+
+            # ✅ ثم إرسال رسالة الطلب
+            await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
 
             context.user_data['order_data'] = {
                 'order_id': order_id,
