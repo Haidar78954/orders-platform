@@ -2938,6 +2938,51 @@ async def handle_done_adding_meals(update: Update, context: CallbackContext) -> 
 
 
 
+async def fixed_orders_from_legacy_dict(orders_dict: dict) -> list:
+    fixed_orders = []
+
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                for key, count in orders_dict.items():
+                    try:
+                        name, size = key.rsplit(" (", 1)
+                        size = size.rstrip(")")
+                    except:
+                        name, size = key, "default"
+
+                    await cursor.execute("SELECT price, size_options FROM meals WHERE name = %s", (name.strip(),))
+                    result = await cursor.fetchone()
+
+                    price = 0
+                    if result:
+                        base_price, size_options_json = result
+                        if size != "default" and size_options_json:
+                            try:
+                                size_options = json.loads(size_options_json)
+                                for opt in size_options:
+                                    if opt["name"] == size:
+                                        price = opt["price"]
+                                        break
+                            except:
+                                price = base_price or 0
+                        else:
+                            price = base_price or 0
+
+                    for _ in range(count):
+                        fixed_orders.append({
+                            "name": name.strip(),
+                            "size": size.strip(),
+                            "price": price
+                        })
+
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء تحويل الطلبات القديمة: {e}")
+
+    return fixed_orders
+
+
+
 
 async def return_to_main_menu(update: Update, context: CallbackContext) -> int:
     reply_markup = ReplyKeyboardMarkup([
@@ -3099,50 +3144,6 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات.")
         return ASK_ORDER_LOCATION
 
-
-
-async def fixed_orders_from_legacy_dict(orders_dict: dict) -> list:
-    fixed_orders = []
-
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                for key, count in orders_dict.items():
-                    try:
-                        name, size = key.rsplit(" (", 1)
-                        size = size.rstrip(")")
-                    except:
-                        name, size = key, "default"
-
-                    await cursor.execute("SELECT price, size_options FROM meals WHERE name = %s", (name.strip(),))
-                    result = await cursor.fetchone()
-
-                    price = 0
-                    if result:
-                        base_price, size_options_json = result
-                        if size != "default" and size_options_json:
-                            try:
-                                size_options = json.loads(size_options_json)
-                                for opt in size_options:
-                                    if opt["name"] == size:
-                                        price = opt["price"]
-                                        break
-                            except:
-                                price = base_price or 0
-                        else:
-                            price = base_price or 0
-
-                    for _ in range(count):
-                        fixed_orders.append({
-                            "name": name.strip(),
-                            "size": size.strip(),
-                            "price": price
-                        })
-
-    except Exception as e:
-        logger.error(f"❌ خطأ أثناء تحويل الطلبات القديمة: {e}")
-
-    return fixed_orders
 
 
 
@@ -3372,12 +3373,26 @@ async def process_confirm_final_order(update, context):
             else:
                 db_detailed_location = db_location_text
 
-        # استخراج البيانات المؤقتة إن وُجدت
-        area_name = user_state.get("temporary_area_name") or user_state.get("area_name") or db_area_name
-        detailed_location = user_state.get("temporary_detailed_location") or user_state.get("detailed_location") or db_detailed_location
-        location_coords = user_state.get("temporary_location_coords") or user_state.get("location_coords") or db_coords
+        # ✅ استخدام الموقع المؤقت من context.user_data أولاً
+        area_name = (
+            context.user_data.get("temporary_area_name")
+            or user_state.get("temporary_area_name")
+            or user_state.get("area_name")
+            or db_area_name
+        )
+        detailed_location = (
+            context.user_data.get("temporary_detailed_location")
+            or user_state.get("temporary_detailed_location")
+            or user_state.get("detailed_location")
+            or db_detailed_location
+        )
+        location_coords = (
+            context.user_data.get("temporary_location_coords")
+            or user_state.get("temporary_location_coords")
+            or user_state.get("location_coords")
+            or db_coords
+        )
 
-        # تكوين النص النهائي للموقع
         location_parts = []
         if area_name:
             location_parts.append(area_name.strip())
@@ -3449,7 +3464,6 @@ async def process_confirm_final_order(update, context):
                 notes=notes
             )
 
-            # إرسال الموقع أولاً إن وُجد
             if location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
@@ -3508,6 +3522,7 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
+
 
 
 
