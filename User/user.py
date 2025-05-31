@@ -1553,23 +1553,35 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
                         (user_id, name, phone, province_id, city_id, location_text, latitude, longitude)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE
-                        name = VALUES(name),
-                        phone = VALUES(phone),
-                        province_id = VALUES(province_id),
-                        city_id = VALUES(city_id),
-                        location_text = VALUES(location_text),
-                        latitude = VALUES(latitude),
-                        longitude = VALUES(longitude)
+                            name = VALUES(name),
+                            phone = VALUES(phone),
+                            province_id = VALUES(province_id),
+                            city_id = VALUES(city_id),
+                            location_text = VALUES(location_text),
+                            latitude = VALUES(latitude),
+                            longitude = VALUES(longitude)
                     """, (user_id, name, phone, province_id, city_id, full_location, latitude, longitude))
-
+            
                     await cursor.execute("SELECT ads_channel FROM cities WHERE id = %s", (city_id,))
                     result = await cursor.fetchone()
                     ads_channel = result[0] if result and result[0] else None
-
+            
                 await conn.commit()
 
+
             # ✅ حفظ حالة المستخدم بعد التسجيل
-            await save_conversation_state(user_id, context.user_data)
+            await save_conversation_state(user_id, {
+                "name": name,
+                "phone": phone,
+                "province_id": province_id,
+                "city_id": city_id,
+                "location_text": full_location,
+                "location_coords": {
+                    "latitude": latitude,
+                    "longitude": longitude
+                }
+            })
+
 
             reply_markup = ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
@@ -3319,118 +3331,45 @@ async def process_confirm_final_order(update, context):
             return MAIN_MENU
 
         order_id = str(uuid.uuid4())
-        
-        # ✅ إضافة تسجيل مفصل لفهم المشكلة
-        logger.info(f"🔍 [DEBUG] user_id: {user_id}")
-        logger.info(f"🔍 [DEBUG] user_state: {user_state}")
-        logger.info(f"🔍 [DEBUG] context.user_data: {context.user_data}")
-        
-        # ✅ إصلاح منطق جلب اسم المستخدم - جلب من قاعدة البيانات أولاً
+
+        # الاسم والرقم من قاعدة البيانات
         name = None
         phone = None
-        
-        # أولاً: جلب البيانات من قاعدة البيانات
+        location_text = None
+        location_coords = None
+
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
                     result = await cursor.fetchone()
-                    
-                    logger.info(f"🔍 [DEBUG] DB query result: {result}")
-                    
                     if result:
-                        db_name, db_phone = result
-                        if db_name:
-                            name = db_name
-                            logger.info(f"🔍 [DEBUG] Got name from DB: {name}")
-                        if db_phone:
-                            phone = db_phone
-                            logger.info(f"🔍 [DEBUG] Got phone from DB: {phone}")
-        except Exception as e:
-            logger.error(f"خطأ في جلب اسم المستخدم من قاعدة البيانات: {e}")
-        
-        # ثانياً: إذا لم نجد البيانات في قاعدة البيانات، استخدم البيانات المؤقتة
-        if not name:
-            name = user_state.get('name', context.user_data.get('name'))
-            logger.info(f"🔍 [DEBUG] Using name from state/context: {name}")
-        
-        if not phone:
-            phone = user_state.get('phone', context.user_data.get('phone'))
-            logger.info(f"🔍 [DEBUG] Using phone from state/context: {phone}")
-        
-        # التأكد من وجود قيم افتراضية
-        if not name or name == 'غير متوفر':
-            name = 'غير متوفر'
-        if not phone or phone == 'غير متوفر':
-            phone = 'غير متوفر'
-            
-        logger.info(f"🔍 [DEBUG] Final name: {name}")
-        logger.info(f"🔍 [DEBUG] Final phone: {phone}")
+                        name, phone = result
 
-        # ✅ إصلاح منطق جلب العنوان - جلب من قاعدة البيانات أولاً
-        location_coords = None
-        location_text = None
-        
-        # أولاً: جلب البيانات من قاعدة البيانات
-        try:
-            async with get_db_connection() as conn:
-                async with conn.cursor() as cursor:
                     await cursor.execute("""
-                        SELECT ud.location_text, c.name as city_name, p.name as province_name,
-                               ud.latitude, ud.longitude
+                        SELECT ud.location_text, ud.latitude, ud.longitude
                         FROM user_data ud
-                        LEFT JOIN cities c ON ud.city_id = c.id
-                        LEFT JOIN provinces p ON ud.province_id = p.id
                         WHERE ud.user_id = %s
                     """, (user_id,))
-                    result = await cursor.fetchone()
-                    
-                    logger.info(f"🔍 [DEBUG] Location DB query result: {result}")
-                    
-                    if result:
-                        db_location_text, city_name, province_name, latitude, longitude = result
-                        logger.info(f"🔍 [DEBUG] db_location_text: {db_location_text}")
-                        logger.info(f"🔍 [DEBUG] city_name: {city_name}")
-                        logger.info(f"🔍 [DEBUG] province_name: {province_name}")
-                        
-                        # تكوين العنوان من البيانات المتوفرة
-                        if db_location_text:
-                            location_text = db_location_text
-                        elif city_name and province_name:
-                            location_text = f"{city_name}, {province_name}"
-                        elif city_name:
-                            location_text = city_name
-                        
-                        # تكوين الإحداثيات
+                    loc_result = await cursor.fetchone()
+                    if loc_result:
+                        location_text, latitude, longitude = loc_result
                         if latitude and longitude:
-                            location_coords = {'latitude': latitude, 'longitude': longitude}
-                            
-        except Exception as e:
-            logger.error(f"خطأ في جلب الموقع من قاعدة البيانات: {e}")
-        
-        # ثانياً: إذا لم نجد البيانات في قاعدة البيانات، استخدم البيانات المؤقتة
-        if not location_text:
-            # التحقق من الموقع المؤقت أولاً
-            temp_location_text = user_state.get('temporary_location_text')
-            temp_location_coords = user_state.get('temporary_location_coords')
-            
-            if temp_location_text and temp_location_text != 'غير متوفر':
-                location_text = temp_location_text
-                location_coords = temp_location_coords
-                logger.info(f"🔍 [DEBUG] Using temporary location: {location_text}")
-            else:
-                # استخدم الموقع الأساسي
-                location_text = user_state.get('location_text')
-                location_coords = user_state.get('location_coords', {})
-                logger.info(f"🔍 [DEBUG] Using main location: {location_text}")
-        
-        # التأكد من وجود قيمة افتراضية للعنوان
-        if not location_text or location_text == 'غير متوفر':
-            location_text = "الموقع غير محدد"
-                
-        logger.info(f"🔍 [DEBUG] Final location_text: {location_text}")
-        logger.info(f"🔍 [DEBUG] Final location_coords: {location_coords}")
+                            location_coords = {"latitude": latitude, "longitude": longitude}
 
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب بيانات المستخدم: {e}")
+
+        # بدائل احتياطية إن لم تكن البيانات موجودة في DB
+        if not name:
+            name = user_state.get("name", context.user_data.get("name", "غير متوفر"))
+        if not phone:
+            phone = user_state.get("phone", context.user_data.get("phone", "غير متوفر"))
+        if not location_text:
+            location_text = user_state.get("temporary_location_text") or user_state.get("location_text", "الموقع غير محدد")
+            location_coords = user_state.get("temporary_location_coords") or user_state.get("location_coords", {})
+
+        # بيانات المطعم
         selected_restaurant = context.user_data.get('selected_restaurant')
         if not selected_restaurant:
             await update.message.reply_text("❌ لم يتم تحديد المطعم.")
@@ -3446,11 +3385,9 @@ async def process_confirm_final_order(update, context):
                         WHERE r.name = %s
                     """, (selected_restaurant,))
                     result = await cursor.fetchone()
-
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على المطعم.")
                         return MAIN_MENU
-
                     restaurant_id, restaurant_channel, city_id = result
 
                     await cursor.execute("""
@@ -3480,27 +3417,24 @@ async def process_confirm_final_order(update, context):
 
                 await conn.commit()
 
-            # ✅ ترتيب الطلبات لتجميع الكميات
+            # تنظيم الطلبات
             summary_counter = defaultdict(int)
             for item in cart:
                 key = (item['name'], item['size'], item['price'])
                 summary_counter[key] += 1
 
             items_for_message = []
-            for (name, size, price), quantity in summary_counter.items():
-                label = f"{name} ({size})" if size != "default" else name
+            for (name_, size_, price_), quantity in summary_counter.items():
+                label = f"{name_} ({size_})" if size_ != "default" else name_
                 items_for_message.append({
                     "name": label,
                     "quantity": quantity,
-                    "price": price
+                    "price": price_
                 })
 
             total_price = sum(item['price'] * item['quantity'] for item in items_for_message)
+            notes = user_state.get('order_notes')
 
-            # 🧾 الحصول على الملاحظات من حالة المستخدم
-            notes = user_state.get('order_notes', None)
-
-            # 🧾 إنشاء نص الطلب
             order_text = create_new_order_message(
                 order_id=order_id,
                 order_number=order_number,
@@ -3512,15 +3446,15 @@ async def process_confirm_final_order(update, context):
                 notes=notes
             )
 
-            # ✅ إرسال الموقع أولاً
-            if location_coords and 'latitude' in location_coords and 'longitude' in location_coords:
+            # إرسال الموقع إن وجد
+            if location_coords and "latitude" in location_coords and "longitude" in location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
-                    latitude=location_coords['latitude'],
-                    longitude=location_coords['longitude']
+                    latitude=location_coords["latitude"],
+                    longitude=location_coords["longitude"]
                 )
 
-            # ✅ ثم إرسال رسالة الطلب
+            # إرسال الطلب
             await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
 
             context.user_data['order_data'] = {
@@ -3546,6 +3480,7 @@ async def process_confirm_final_order(update, context):
                 f"رح يبعتلك الكاشير بس يبلشو 😉",
                 reply_markup=reply_markup
             )
+
             await context.bot.send_sticker(
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxnFoMQZFcg7tO0yexYxhUK4JLJAc0gACZDQAAqVkGUp0aoPgoYfAATYE"
@@ -3572,6 +3507,7 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
+
 
 
 
