@@ -3332,11 +3332,12 @@ async def process_confirm_final_order(update, context):
 
         order_id = str(uuid.uuid4())
 
-        # الاسم والرقم من قاعدة البيانات
+        logger.info(f"🔍 [DEBUG] user_id: {user_id}")
+        logger.info(f"🔍 [DEBUG] user_state: {user_state}")
+        logger.info(f"🔍 [DEBUG] context.user_data: {context.user_data}")
+
         name = None
         phone = None
-        location_text = None
-        location_coords = None
 
         try:
             async with get_db_connection() as conn:
@@ -3344,32 +3345,62 @@ async def process_confirm_final_order(update, context):
                     await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
                     result = await cursor.fetchone()
                     if result:
-                        name, phone = result
+                        db_name, db_phone = result
+                        name = db_name or name
+                        phone = db_phone or phone
+        except Exception as e:
+            logger.error(f"❌ خطأ في جلب الاسم أو الرقم من قاعدة البيانات: {e}")
 
+        if not name:
+            name = user_state.get('name', context.user_data.get('name', 'غير متوفر'))
+        if not phone:
+            phone = user_state.get('phone', context.user_data.get('phone', 'غير متوفر'))
+
+        logger.info(f"🔍 [DEBUG] Final name: {name}")
+        logger.info(f"🔍 [DEBUG] Final phone: {phone}")
+
+        location_coords = None
+        location_text = None
+
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
                     await cursor.execute("""
-                        SELECT ud.location_text, ud.latitude, ud.longitude
+                        SELECT ud.location_text, c.name, p.name, ud.latitude, ud.longitude
                         FROM user_data ud
+                        LEFT JOIN cities c ON ud.city_id = c.id
+                        LEFT JOIN provinces p ON ud.province_id = p.id
                         WHERE ud.user_id = %s
                     """, (user_id,))
-                    loc_result = await cursor.fetchone()
-                    if loc_result:
-                        location_text, latitude, longitude = loc_result
+                    result = await cursor.fetchone()
+                    if result:
+                        db_location_text, city_name, province_name, latitude, longitude = result
+                        if db_location_text:
+                            location_text = db_location_text
+                        elif city_name and province_name:
+                            location_text = f"{city_name} - {province_name}"
+                        elif city_name:
+                            location_text = city_name
                         if latitude and longitude:
                             location_coords = {"latitude": latitude, "longitude": longitude}
-
         except Exception as e:
-            logger.error(f"❌ خطأ في جلب بيانات المستخدم: {e}")
+            logger.error(f"❌ خطأ في جلب الموقع من قاعدة البيانات: {e}")
 
-        # بدائل احتياطية إن لم تكن البيانات موجودة في DB
-        if not name:
-            name = user_state.get("name", context.user_data.get("name", "غير متوفر"))
-        if not phone:
-            phone = user_state.get("phone", context.user_data.get("phone", "غير متوفر"))
         if not location_text:
-            location_text = user_state.get("temporary_location_text") or user_state.get("location_text", "الموقع غير محدد")
-            location_coords = user_state.get("temporary_location_coords") or user_state.get("location_coords", {})
+            # ✅ استخدام الموقع المؤقت: اسم المنطقة + وصف تفصيلي
+            area_name = user_state.get("temporary_area_name", "")
+            detailed_location = user_state.get("temporary_detailed_location", "")
+            composed = f"{area_name} - {detailed_location}".strip(" -")
+            if composed and composed != "غير متوفر":
+                location_text = composed
+                location_coords = user_state.get("temporary_location_coords", {})
+                logger.info(f"🔍 [DEBUG] Using composed temporary location: {location_text}")
+            else:
+                location_text = "الموقع غير محدد"
 
-        # بيانات المطعم
+        logger.info(f"🔍 [DEBUG] Final location_text: {location_text}")
+        logger.info(f"🔍 [DEBUG] Final location_coords: {location_coords}")
+
         selected_restaurant = context.user_data.get('selected_restaurant')
         if not selected_restaurant:
             await update.message.reply_text("❌ لم يتم تحديد المطعم.")
@@ -3388,16 +3419,16 @@ async def process_confirm_final_order(update, context):
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على المطعم.")
                         return MAIN_MENU
+
                     restaurant_id, restaurant_channel, city_id = result
 
                     await cursor.execute("""
                         SELECT last_order_number FROM restaurant_order_counter
                         WHERE restaurant_id = %s
                     """, (restaurant_id,))
-                    counter_result = await cursor.fetchone()
-
-                    if counter_result:
-                        order_number = counter_result[0] + 1
+                    result = await cursor.fetchone()
+                    if result:
+                        order_number = result[0] + 1
                         await cursor.execute("""
                             UPDATE restaurant_order_counter
                             SET last_order_number = %s
@@ -3414,47 +3445,33 @@ async def process_confirm_final_order(update, context):
                         INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id)
                         VALUES (%s, %s, %s, %s)
                     """, (order_id, user_id, restaurant_id, city_id))
-
                 await conn.commit()
 
-            # تنظيم الطلبات
             summary_counter = defaultdict(int)
             for item in cart:
                 key = (item['name'], item['size'], item['price'])
                 summary_counter[key] += 1
 
             items_for_message = []
-            for (name_, size_, price_), quantity in summary_counter.items():
-                label = f"{name_} ({size_})" if size_ != "default" else name_
-                items_for_message.append({
-                    "name": label,
-                    "quantity": quantity,
-                    "price": price_
-                })
+            for (name, size, price), qty in summary_counter.items():
+                label = f"{name} ({size})" if size != "default" else name
+                items_for_message.append({"name": label, "quantity": qty, "price": price})
 
-            total_price = sum(item['price'] * item['quantity'] for item in items_for_message)
-            notes = user_state.get('order_notes')
+            total_price = sum(item["price"] * item["quantity"] for item in items_for_message)
+            notes = user_state.get("order_notes")
 
             order_text = create_new_order_message(
-                order_id=order_id,
-                order_number=order_number,
-                user_name=name,
-                phone=phone,
-                address=location_text,
-                items=items_for_message,
-                total_price=total_price,
-                notes=notes
+                order_id, order_number, name, phone, location_text,
+                items_for_message, total_price, notes
             )
 
-            # إرسال الموقع إن وجد
-            if location_coords and "latitude" in location_coords and "longitude" in location_coords:
+            if location_coords and 'latitude' in location_coords and 'longitude' in location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
-                    latitude=location_coords["latitude"],
-                    longitude=location_coords["longitude"]
+                    latitude=location_coords['latitude'],
+                    longitude=location_coords['longitude']
                 )
 
-            # إرسال الطلب
             await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
 
             context.user_data['order_data'] = {
