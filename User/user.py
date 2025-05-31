@@ -3331,77 +3331,61 @@ async def process_confirm_final_order(update, context):
             return MAIN_MENU
 
         order_id = str(uuid.uuid4())
+        logger.info(f"🔍 user_id: {user_id}, context.user_data: {context.user_data}")
 
-        logger.info(f"🔍 [DEBUG] user_id: {user_id}")
-        logger.info(f"🔍 [DEBUG] user_state: {user_state}")
-        logger.info(f"🔍 [DEBUG] context.user_data: {context.user_data}")
-
-        name = None
-        phone = None
-
+        # جلب الاسم ورقم الهاتف من قاعدة البيانات أو الحالة
+        name, phone = None, None
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
                     result = await cursor.fetchone()
                     if result:
-                        db_name, db_phone = result
-                        name = db_name or name
-                        phone = db_phone or phone
+                        name, phone = result
         except Exception as e:
-            logger.error(f"❌ خطأ في جلب الاسم أو الرقم من قاعدة البيانات: {e}")
+            logger.error(f"❌ خطأ أثناء جلب الاسم من قاعدة البيانات: {e}")
 
         if not name:
-            name = user_state.get('name', context.user_data.get('name', 'غير متوفر'))
+            name = user_state.get("name") or context.user_data.get("name") or "غير متوفر"
         if not phone:
-            phone = user_state.get('phone', context.user_data.get('phone', 'غير متوفر'))
+            phone = user_state.get("phone") or context.user_data.get("phone") or "غير متوفر"
 
-        logger.info(f"🔍 [DEBUG] Final name: {name}")
-        logger.info(f"🔍 [DEBUG] Final phone: {phone}")
-
+        # جلب الموقع من قاعدة البيانات أو الموقع المؤقت
         location_coords = None
-        location_text = None
-
+        db_area_name = db_detailed_location = None
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute("""
-                        SELECT ud.location_text, c.name, p.name, ud.latitude, ud.longitude
+                        SELECT ud.location_text, ud.latitude, ud.longitude
                         FROM user_data ud
-                        LEFT JOIN cities c ON ud.city_id = c.id
-                        LEFT JOIN provinces p ON ud.province_id = p.id
                         WHERE ud.user_id = %s
                     """, (user_id,))
                     result = await cursor.fetchone()
                     if result:
-                        db_location_text, city_name, province_name, latitude, longitude = result
-                        if db_location_text:
-                            location_text = db_location_text
-                        elif city_name and province_name:
-                            location_text = f"{city_name} - {province_name}"
-                        elif city_name:
-                            location_text = city_name
+                        db_location_text, latitude, longitude = result
                         if latitude and longitude:
-                            location_coords = {"latitude": latitude, "longitude": longitude}
+                            location_coords = {'latitude': latitude, 'longitude': longitude}
+                        db_area_name, db_detailed_location = (db_location_text or "").split(" - ") if " - " in (db_location_text or "") else (None, db_location_text)
         except Exception as e:
-            logger.error(f"❌ خطأ في جلب الموقع من قاعدة البيانات: {e}")
+            logger.error(f"❌ خطأ أثناء جلب الموقع من قاعدة البيانات: {e}")
 
-        if not location_text:
-            # ✅ استخدام الموقع المؤقت: اسم المنطقة + وصف تفصيلي
-            area_name = user_state.get("temporary_area_name", "")
-            detailed_location = user_state.get("temporary_detailed_location", "")
-            composed = f"{area_name} - {detailed_location}".strip(" -")
-            if composed and composed != "غير متوفر":
-                location_text = composed
-                location_coords = user_state.get("temporary_location_coords", {})
-                logger.info(f"🔍 [DEBUG] Using composed temporary location: {location_text}")
-            else:
-                location_text = "الموقع غير محدد"
+        # استخدام القيم المؤقتة إن وُجدت
+        area_name = user_state.get("temporary_area_name") or user_state.get("area_name") or db_area_name
+        detailed_location = user_state.get("temporary_detailed_location") or user_state.get("detailed_location") or db_detailed_location
 
-        logger.info(f"🔍 [DEBUG] Final location_text: {location_text}")
-        logger.info(f"🔍 [DEBUG] Final location_coords: {location_coords}")
+        if area_name and detailed_location:
+            location_text = f"{area_name} - {detailed_location}"
+        elif detailed_location:
+            location_text = detailed_location
+        elif area_name:
+            location_text = area_name
+        else:
+            location_text = "الموقع غير محدد"
 
-        selected_restaurant = context.user_data.get('selected_restaurant')
+        logger.info(f"🔍 Final name: {name}, phone: {phone}, location: {location_text}")
+
+        selected_restaurant = context.user_data.get("selected_restaurant")
         if not selected_restaurant:
             await update.message.reply_text("❌ لم يتم تحديد المطعم.")
             return MAIN_MENU
@@ -3416,70 +3400,66 @@ async def process_confirm_final_order(update, context):
                         WHERE r.name = %s
                     """, (selected_restaurant,))
                     result = await cursor.fetchone()
+
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على المطعم.")
                         return MAIN_MENU
 
                     restaurant_id, restaurant_channel, city_id = result
 
-                    await cursor.execute("""
-                        SELECT last_order_number FROM restaurant_order_counter
-                        WHERE restaurant_id = %s
-                    """, (restaurant_id,))
-                    result = await cursor.fetchone()
-                    if result:
-                        order_number = result[0] + 1
-                        await cursor.execute("""
-                            UPDATE restaurant_order_counter
-                            SET last_order_number = %s
-                            WHERE restaurant_id = %s
-                        """, (order_number, restaurant_id))
+                    await cursor.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant_id = %s", (restaurant_id,))
+                    counter_result = await cursor.fetchone()
+
+                    if counter_result:
+                        order_number = counter_result[0] + 1
+                        await cursor.execute("UPDATE restaurant_order_counter SET last_order_number = %s WHERE restaurant_id = %s", (order_number, restaurant_id))
                     else:
                         order_number = 1
-                        await cursor.execute("""
-                            INSERT INTO restaurant_order_counter (restaurant_id, last_order_number)
-                            VALUES (%s, %s)
-                        """, (restaurant_id, order_number))
+                        await cursor.execute("INSERT INTO restaurant_order_counter (restaurant_id, last_order_number) VALUES (%s, %s)", (restaurant_id, order_number))
 
-                    await cursor.execute("""
-                        INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id)
-                        VALUES (%s, %s, %s, %s)
-                    """, (order_id, user_id, restaurant_id, city_id))
+                    await cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id) VALUES (%s, %s, %s, %s)", (order_id, user_id, restaurant_id, city_id))
+
                 await conn.commit()
 
             summary_counter = defaultdict(int)
             for item in cart:
-                key = (item['name'], item['size'], item['price'])
+                key = (item["name"], item["size"], item["price"])
                 summary_counter[key] += 1
 
             items_for_message = []
-            for (name, size, price), qty in summary_counter.items():
-                label = f"{name} ({size})" if size != "default" else name
-                items_for_message.append({"name": label, "quantity": qty, "price": price})
+            for (name_, size, price), quantity in summary_counter.items():
+                label = f"{name_} ({size})" if size != "default" else name_
+                items_for_message.append({"name": label, "quantity": quantity, "price": price})
 
             total_price = sum(item["price"] * item["quantity"] for item in items_for_message)
             notes = user_state.get("order_notes")
 
             order_text = create_new_order_message(
-                order_id, order_number, name, phone, location_text,
-                items_for_message, total_price, notes
+                order_id=order_id,
+                order_number=order_number,
+                user_name=name,
+                phone=phone,
+                address=location_text,
+                items=items_for_message,
+                total_price=total_price,
+                notes=notes
             )
 
-            if location_coords and 'latitude' in location_coords and 'longitude' in location_coords:
+            if location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
-                    latitude=location_coords['latitude'],
-                    longitude=location_coords['longitude']
+                    latitude=location_coords["latitude"],
+                    longitude=location_coords["longitude"]
                 )
 
             await send_message_with_retry(context.bot, restaurant_channel, text=order_text, parse_mode="Markdown")
 
-            context.user_data['order_data'] = {
-                'order_id': order_id,
-                'order_number': order_number,
-                'selected_restaurant': selected_restaurant,
-                'timestamp': datetime.now(),
-                'total_price': total_price
+            context.user_data["order_data"] = {
+                "order_id": order_id,
+                "order_number": order_number,
+                "selected_restaurant": selected_restaurant,
+                "timestamp": datetime.now(),
+                "total_price": total_price
             }
 
             await delete_cart_from_db(user_id)
@@ -3497,7 +3477,6 @@ async def process_confirm_final_order(update, context):
                 f"رح يبعتلك الكاشير بس يبلشو 😉",
                 reply_markup=reply_markup
             )
-
             await context.bot.send_sticker(
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxnFoMQZFcg7tO0yexYxhUK4JLJAc0gACZDQAAqVkGUp0aoPgoYfAATYE"
