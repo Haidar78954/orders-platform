@@ -1538,7 +1538,7 @@ async def handle_confirmation(update: Update, context: CallbackContext) -> int:
             phone = context.user_data['phone']
             province_id = context.user_data['province_id']
             city_id = context.user_data['city_id']
-            area_name = context.user_data.get('area_name', '')
+            area_name = context.user_data.get('temporary_area_name') or context.user_data.get('area_name', '')
             detailed_location = context.user_data.get('detailed_location', '')
             full_location = f"{area_name} - {detailed_location}".strip(" -")
 
