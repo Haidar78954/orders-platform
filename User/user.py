@@ -3374,14 +3374,15 @@ async def process_confirm_final_order(update, context):
         area_name = user_state.get("temporary_area_name") or user_state.get("area_name") or db_area_name
         detailed_location = user_state.get("temporary_detailed_location") or user_state.get("detailed_location") or db_detailed_location
 
-        if area_name and detailed_location:
-            location_text = f"{area_name} - {detailed_location}"
-        elif detailed_location:
-            location_text = detailed_location
-        elif area_name:
-            location_text = area_name
-        else:
-            location_text = "الموقع غير محدد"
+        location_parts = []
+
+        if area_name:
+            location_parts.append(area_name.strip())
+        if detailed_location:
+            location_parts.append(detailed_location.strip())
+        
+        location_text = " - ".join(location_parts) if location_parts else "الموقع غير محدد"
+
 
         logger.info(f"🔍 Final name: {name}, phone: {phone}, location: {location_text}")
 
