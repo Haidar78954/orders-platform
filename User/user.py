@@ -3300,6 +3300,8 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
 
 
 
+
+
 async def handle_confirm_final_order(update: Update, context: CallbackContext) -> int:
     return await process_confirm_final_order(update, context)
 
@@ -3317,70 +3319,117 @@ async def process_confirm_final_order(update, context):
             return MAIN_MENU
 
         order_id = str(uuid.uuid4())
-        # ✅ إصلاح منطق جلب اسم المستخدم
-        name = user_state.get('name', context.user_data.get('name'))
-        phone = user_state.get('phone', context.user_data.get('phone'))
         
-        # إذا لم يكن الاسم متوفراً أو كان خاطئاً، جلبه من قاعدة البيانات
-        if not name or name == 'غير متوفر':
-            try:
-                async with get_db_connection() as conn:
-                    async with conn.cursor() as cursor:
-                        await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
-                        result = await cursor.fetchone()
-                        
-                        if result:
-                            db_name, db_phone = result
-                            if db_name:
-                                name = db_name
-                            if db_phone and not phone:
-                                phone = db_phone
-            except Exception as e:
-                logger.error(f"خطأ في جلب اسم المستخدم من قاعدة البيانات: {e}")
+        # ✅ إضافة تسجيل مفصل لفهم المشكلة
+        logger.info(f"🔍 [DEBUG] user_id: {user_id}")
+        logger.info(f"🔍 [DEBUG] user_state: {user_state}")
+        logger.info(f"🔍 [DEBUG] context.user_data: {context.user_data}")
+        
+        # ✅ إصلاح منطق جلب اسم المستخدم - جلب من قاعدة البيانات أولاً
+        name = None
+        phone = None
+        
+        # أولاً: جلب البيانات من قاعدة البيانات
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("SELECT name, phone FROM user_data WHERE user_id = %s", (user_id,))
+                    result = await cursor.fetchone()
+                    
+                    logger.info(f"🔍 [DEBUG] DB query result: {result}")
+                    
+                    if result:
+                        db_name, db_phone = result
+                        if db_name:
+                            name = db_name
+                            logger.info(f"🔍 [DEBUG] Got name from DB: {name}")
+                        if db_phone:
+                            phone = db_phone
+                            logger.info(f"🔍 [DEBUG] Got phone from DB: {phone}")
+        except Exception as e:
+            logger.error(f"خطأ في جلب اسم المستخدم من قاعدة البيانات: {e}")
+        
+        # ثانياً: إذا لم نجد البيانات في قاعدة البيانات، استخدم البيانات المؤقتة
+        if not name:
+            name = user_state.get('name', context.user_data.get('name'))
+            logger.info(f"🔍 [DEBUG] Using name from state/context: {name}")
+        
+        if not phone:
+            phone = user_state.get('phone', context.user_data.get('phone'))
+            logger.info(f"🔍 [DEBUG] Using phone from state/context: {phone}")
         
         # التأكد من وجود قيم افتراضية
-        if not name:
+        if not name or name == 'غير متوفر':
             name = 'غير متوفر'
-        if not phone:
+        if not phone or phone == 'غير متوفر':
             phone = 'غير متوفر'
+            
+        logger.info(f"🔍 [DEBUG] Final name: {name}")
+        logger.info(f"🔍 [DEBUG] Final phone: {phone}")
 
-        # ✅ إصلاح منطق جلب العنوان
-        # أولاً: التحقق من الموقع المؤقت
-        location_coords = user_state.get('temporary_location_coords')
-        location_text = user_state.get('temporary_location_text')
+        # ✅ إصلاح منطق جلب العنوان - جلب من قاعدة البيانات أولاً
+        location_coords = None
+        location_text = None
         
-        # إذا لم يكن هناك موقع مؤقت، استخدم الموقع الأساسي
-        if not location_text or location_text == 'غير متوفر':
-            location_coords = user_state.get('location_coords', {})
-            location_text = user_state.get('location_text')
-        
-        # إذا لم يكن هناك نص موقع، جرب جلبه من قاعدة البيانات
-        if not location_text or location_text == 'غير متوفر':
-            try:
-                async with get_db_connection() as conn:
-                    async with conn.cursor() as cursor:
-                        await cursor.execute("""
-                            SELECT ud.location_text, c.name as city_name, p.name as province_name
-                            FROM user_data ud
-                            LEFT JOIN cities c ON ud.city_id = c.id
-                            LEFT JOIN provinces p ON ud.province_id = p.id
-                            WHERE ud.user_id = %s
-                        """, (user_id,))
-                        result = await cursor.fetchone()
+        # أولاً: جلب البيانات من قاعدة البيانات
+        try:
+            async with get_db_connection() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute("""
+                        SELECT ud.location_text, c.name as city_name, p.name as province_name,
+                               ud.latitude, ud.longitude
+                        FROM user_data ud
+                        LEFT JOIN cities c ON ud.city_id = c.id
+                        LEFT JOIN provinces p ON ud.province_id = p.id
+                        WHERE ud.user_id = %s
+                    """, (user_id,))
+                    result = await cursor.fetchone()
+                    
+                    logger.info(f"🔍 [DEBUG] Location DB query result: {result}")
+                    
+                    if result:
+                        db_location_text, city_name, province_name, latitude, longitude = result
+                        logger.info(f"🔍 [DEBUG] db_location_text: {db_location_text}")
+                        logger.info(f"🔍 [DEBUG] city_name: {city_name}")
+                        logger.info(f"🔍 [DEBUG] province_name: {province_name}")
                         
-                        if result:
-                            db_location_text, city_name, province_name = result
-                            if db_location_text:
-                                location_text = db_location_text
-                            elif city_name and province_name:
-                                location_text = f"{city_name}, {province_name}"
-                            else:
-                                location_text = "الموقع غير محدد"
-                        else:
-                            location_text = "الموقع غير محدد"
-            except Exception as e:
-                logger.error(f"خطأ في جلب الموقع من قاعدة البيانات: {e}")
-                location_text = "الموقع غير محدد"
+                        # تكوين العنوان من البيانات المتوفرة
+                        if db_location_text:
+                            location_text = db_location_text
+                        elif city_name and province_name:
+                            location_text = f"{city_name}, {province_name}"
+                        elif city_name:
+                            location_text = city_name
+                        
+                        # تكوين الإحداثيات
+                        if latitude and longitude:
+                            location_coords = {'latitude': latitude, 'longitude': longitude}
+                            
+        except Exception as e:
+            logger.error(f"خطأ في جلب الموقع من قاعدة البيانات: {e}")
+        
+        # ثانياً: إذا لم نجد البيانات في قاعدة البيانات، استخدم البيانات المؤقتة
+        if not location_text:
+            # التحقق من الموقع المؤقت أولاً
+            temp_location_text = user_state.get('temporary_location_text')
+            temp_location_coords = user_state.get('temporary_location_coords')
+            
+            if temp_location_text and temp_location_text != 'غير متوفر':
+                location_text = temp_location_text
+                location_coords = temp_location_coords
+                logger.info(f"🔍 [DEBUG] Using temporary location: {location_text}")
+            else:
+                # استخدم الموقع الأساسي
+                location_text = user_state.get('location_text')
+                location_coords = user_state.get('location_coords', {})
+                logger.info(f"🔍 [DEBUG] Using main location: {location_text}")
+        
+        # التأكد من وجود قيمة افتراضية للعنوان
+        if not location_text or location_text == 'غير متوفر':
+            location_text = "الموقع غير محدد"
+                
+        logger.info(f"🔍 [DEBUG] Final location_text: {location_text}")
+        logger.info(f"🔍 [DEBUG] Final location_coords: {location_coords}")
 
         selected_restaurant = context.user_data.get('selected_restaurant')
         if not selected_restaurant:
@@ -3523,7 +3572,6 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
-
 
 
 
