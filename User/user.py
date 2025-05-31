@@ -2507,7 +2507,6 @@ async def process_category_selection(update: Update, context: CallbackContext) -
 
 
 
-
 # 📸 دالة لاختبار نسخ صورة من القناة
 async def test_copy_image(update: Update, context: CallbackContext):
     try:
@@ -2806,21 +2805,22 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
             buttons = []
 
             if sizes:
-                # تعديل: وضع جميع أزرار القياسات في صف واحد أفقي
+                # تعديل: وضع جميع أزرار القياسات في صف واحد أفقي مع تبسيط النص
                 size_buttons = []
                 for opt in sizes:
+                    # تبسيط النص ليكون "القياس السعر" فقط بدون رموز
                     size_buttons.append(
                         InlineKeyboardButton(
-                            f"{opt['name']} - {opt['price']} ل.س",
+                            f"{opt['name']} {opt['price']}",
                             callback_data=f"add_meal_with_size:{meal_id}:{opt['name']}"
                         )
                     )
                 # إضافة جميع أزرار القياسات في صف واحد
                 buttons.append(size_buttons)
             else:
-                # في حال لا يوجد قياسات
+                # في حال لا يوجد قياسات، أضف زر إضافة للسلة
                 buttons.append([
-                    InlineKeyboardButton(f"➕ أضف للسلة ({price} ل.س)", callback_data=f"add_meal_with_size:{meal_id}:default")
+                    InlineKeyboardButton(f"➕ أضف للسلة ({price})", callback_data=f"add_meal_with_size:{meal_id}:default")
                 ])
 
             # ✅ زر حذف اللمسة الأخيرة في صف مستقل
@@ -2828,10 +2828,7 @@ async def show_meals_in_category(update: Update, context: CallbackContext):
                 InlineKeyboardButton("❌ حذف اللمسة الأخيرة", callback_data=f"remove_specific_meal:{meal_id}:last")
             ])
 
-            # ✅ زر تم في صف مستقل
-            buttons.append([
-                InlineKeyboardButton("✅ تم", callback_data="done_adding_meals")
-            ])
+            # إزالة زر "تم" من أزرار InlineKeyboard كما طلب المستخدم
 
             reply_markup = InlineKeyboardMarkup(buttons)
 
@@ -3333,7 +3330,7 @@ async def process_confirm_final_order(update, context):
         order_id = str(uuid.uuid4())
         logger.info(f"🔍 user_id: {user_id}, context.user_data: {context.user_data}")
 
-        # جلب الاسم ورقم الهاتف من قاعدة البيانات أو الحالة
+        # جلب الاسم ورقم الهاتف
         name, phone = None, None
         try:
             async with get_db_connection() as conn:
@@ -3345,46 +3342,51 @@ async def process_confirm_final_order(update, context):
         except Exception as e:
             logger.error(f"❌ خطأ أثناء جلب الاسم من قاعدة البيانات: {e}")
 
-        if not name:
-            name = user_state.get("name") or context.user_data.get("name") or "غير متوفر"
-        if not phone:
-            phone = user_state.get("phone") or context.user_data.get("phone") or "غير متوفر"
+        name = name or user_state.get("name") or context.user_data.get("name") or "غير متوفر"
+        phone = phone or user_state.get("phone") or context.user_data.get("phone") or "غير متوفر"
 
-        # جلب الموقع من قاعدة البيانات أو الموقع المؤقت
-        location_coords = None
-        db_area_name = db_detailed_location = None
+        # جلب الموقع من قاعدة البيانات
+        db_location_text = None
+        db_coords = None
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
                     await cursor.execute("""
-                        SELECT ud.location_text, ud.latitude, ud.longitude
-                        FROM user_data ud
-                        WHERE ud.user_id = %s
+                        SELECT location_text, latitude, longitude
+                        FROM user_data
+                        WHERE user_id = %s
                     """, (user_id,))
                     result = await cursor.fetchone()
                     if result:
-                        db_location_text, latitude, longitude = result
-                        if latitude and longitude:
-                            location_coords = {'latitude': latitude, 'longitude': longitude}
-                        db_area_name, db_detailed_location = (db_location_text or "").split(" - ") if " - " in (db_location_text or "") else (None, db_location_text)
+                        db_location_text, lat, lon = result
+                        if lat and lon:
+                            db_coords = {"latitude": lat, "longitude": lon}
         except Exception as e:
             logger.error(f"❌ خطأ أثناء جلب الموقع من قاعدة البيانات: {e}")
 
-        # استخدام القيم المؤقتة إن وُجدت
+        # تقسيم الموقع الأساسي إن وُجد
+        db_area_name = db_detailed_location = None
+        if db_location_text:
+            if " - " in db_location_text:
+                db_area_name, db_detailed_location = db_location_text.split(" - ", 1)
+            else:
+                db_detailed_location = db_location_text
+
+        # استخراج البيانات المؤقتة إن وُجدت
         area_name = user_state.get("temporary_area_name") or user_state.get("area_name") or db_area_name
         detailed_location = user_state.get("temporary_detailed_location") or user_state.get("detailed_location") or db_detailed_location
+        location_coords = user_state.get("temporary_location_coords") or user_state.get("location_coords") or db_coords
 
+        # تكوين النص النهائي للموقع
         location_parts = []
-
         if area_name:
             location_parts.append(area_name.strip())
         if detailed_location:
             location_parts.append(detailed_location.strip())
-        
         location_text = " - ".join(location_parts) if location_parts else "الموقع غير محدد"
 
-
-        logger.info(f"🔍 Final name: {name}, phone: {phone}, location: {location_text}")
+        logger.info(f"📍 Final location: {location_text}")
+        logger.info(f"👤 Final name: {name} | 📱 {phone}")
 
         selected_restaurant = context.user_data.get("selected_restaurant")
         if not selected_restaurant:
@@ -3422,6 +3424,7 @@ async def process_confirm_final_order(update, context):
 
                 await conn.commit()
 
+            # تجهيز عناصر السلة
             summary_counter = defaultdict(int)
             for item in cart:
                 key = (item["name"], item["size"], item["price"])
@@ -3433,7 +3436,7 @@ async def process_confirm_final_order(update, context):
                 items_for_message.append({"name": label, "quantity": quantity, "price": price})
 
             total_price = sum(item["price"] * item["quantity"] for item in items_for_message)
-            notes = user_state.get("order_notes")
+            notes = user_state.get("order_notes") or context.user_data.get("order_notes", "لا توجد ملاحظات.")
 
             order_text = create_new_order_message(
                 order_id=order_id,
@@ -3446,6 +3449,7 @@ async def process_confirm_final_order(update, context):
                 notes=notes
             )
 
+            # إرسال الموقع أولاً إن وُجد
             if location_coords:
                 await context.bot.send_location(
                     chat_id=restaurant_channel,
@@ -3504,8 +3508,6 @@ async def process_confirm_final_order(update, context):
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CONFIRM_FINAL_ORDER
-
-
 
 
 
