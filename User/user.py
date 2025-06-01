@@ -3670,27 +3670,52 @@ async def handle_confirm_cancellation(update: Update, context: CallbackContext) 
 
     if choice == "اي اي متاكد 🥱":
         now = datetime.now()
-
+    
         # ✅ سجل وقت الإلغاء مع تنظيف الإدخالات الأقدم من ساعة
         if "cancel_history" not in context.user_data:
             context.user_data["cancel_history"] = []
-
+    
         context.user_data["cancel_history"] = [
             t for t in context.user_data["cancel_history"]
             if (now - t).total_seconds() <= 3600
         ]
         context.user_data["cancel_history"].append(now)
-
+    
+        # ✅ استخراج بيانات الطلب للإبلاغ
+        order_id = order_data.get("order_id", "غير معروف")
+        order_number = order_data.get("order_number", "؟")
+        user_name = update.effective_user.full_name
+        restaurant_channel_id = order_data.get("channel_id")
+    
+        if restaurant_channel_id:
+            await context.bot.send_message(
+                chat_id=restaurant_channel_id,
+                text=(
+                    f"🚫 تم إلغاء الطلب رقم {order_number} من قبل الزبون.\n"
+                    f"📌 معرف الطلب: `{order_id}`\n"
+                    f"👤 الزبون: {user_name}\n"
+                    f"📍 السبب: تأخر بالموافقة.\n\n"
+                    f"يرجى الانتباه في المرات القادمة.\n"
+                    f"نحن سنعتذر منه وندعوه للطلب لاحقًا بسبب ضغط الطلبات."
+                ),
+                parse_mode="Markdown"
+            )
+        else:
+            logger.warning("⚠️ لم يتم تحديد channel_id لإرسال رسالة الإلغاء.")
+    
         # حذف بيانات الطلب
         for key in ['orders', 'selected_restaurant', 'order_data']:
             context.user_data.pop(key, None)
-
+    
         reply_markup = ReplyKeyboardMarkup([
             ["اطلب عالسريع 🔥"],
             ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
             ["من نحن 🏢", "أسئلة متكررة ❓"]
         ], resize_keyboard=True)
-        await update.message.reply_text("تم إلغاء طلبك ، بتمنى منك تنتبه اكتر تاني مرة قبل التأكيد ☺️", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "تم إلغاء طلبك، بتمنى منك تنتبه أكتر تاني مرة قبل التأكيد ☺️",
+            reply_markup=reply_markup
+        )
         return MAIN_MENU
 
     elif choice == "معلش رجعني 🙃":
@@ -3860,15 +3885,13 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
     if restaurant_channel and order_number:
         await context.bot.send_message(
             chat_id=restaurant_channel,
-            text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. نرجو الاستعجال في التحضير 🙏.",
+            text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. نرجو الاستعجال في الموافقة على الطلب فورا !! 🙏.",
         )
         await update.message.reply_text("حكينالك ياه لازم يستحي ع دمه 🤨")
     else:
         await update.message.reply_text("❌ لم يتم العثور على قناة المطعم أو رقم الطلب.")
 
     return MAIN_MENU
-
-
 
 
 
@@ -3895,19 +3918,32 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
             await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
             return MAIN_MENU
 
-        context.user_data.pop("order_data", None)
-
         selected_restaurant = order_data.get("selected_restaurant")
         order_number = order_data.get("order_number")
+        order_id = order_data.get("order_id")
+        user_name = update.effective_user.first_name or "مستخدم"
+
+        context.user_data.pop("order_data", None)
+
+        # ✅ استعلام قناة المطعم
         cursor = db_conn.cursor()
         cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
         result = cursor.fetchone()
         restaurant_channel = result[0] if result else None
 
         if restaurant_channel:
+            cancellation_text = (
+                f"🚫 تم إلغاء الطلب رقم {order_number} من قبل الزبون.\n"
+                f"📌 معرف الطلب: `{order_id}`\n"
+                f"👤 الزبون: {user_name}\n"
+                f"📍 السبب: تأخر بالموافقة.\n\n"
+                f"يرجى الانتباه في المرات القادمة.\n"
+                f"نحن سنعتذر منه وندعوه للطلب لاحقًا بسبب ضغط الطلبات."
+            )
             await context.bot.send_message(
                 chat_id=restaurant_channel,
-                text=f"🚫 تم إلغاء الطلب رقم: {order_number} من قبل الزبون."
+                text=cancellation_text,
+                parse_mode="Markdown"
             )
             await update.message.reply_text("ألغينالك الطلب ، اذا في مشكلة حكينا 🫠")
         else:
@@ -3929,6 +3965,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CANCEL_ORDER_OPTIONS
+
 
 
 
