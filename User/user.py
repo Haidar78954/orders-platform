@@ -1246,15 +1246,13 @@ async def handle_city(update: Update, context: CallbackContext) -> int:
 
     # ✅ زر الشرح (Inline)
     inline_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+        [InlineKeyboardButton("عالسريع كيف ؟ 🔥", callback_data="how_to_send_location")]
     ])
 
     await update.message.reply_text("اختار ارسال موقعي اذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
-    await update.message.reply_text("👇 إذا مو واضح فيك تشوف شرح سريع:", reply_markup=inline_markup)
+    await update.message.reply_text("اذا ما بتعرف تشغل لوكيشن", reply_markup=inline_markup)
     await asyncio.sleep(0.5)
     await update.message.reply_text("اذا ماكنت مفعل، رح تضطر تدور عموقع وتضغط مطول وترسلو 👇")
-    await asyncio.sleep(0.5)
-    await update.message.reply_text("شغل GPS وأرسل الموقع 📍")
     await asyncio.sleep(0.5)
     await update.message.reply_text("ما بدا شي 😄")
 
@@ -1370,15 +1368,15 @@ async def ask_location(update: Update, context: CallbackContext) -> int:
     ], resize_keyboard=True)
 
     await update.message.reply_text("اختار إرسال موقعي إذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("إذا ما كنت مفعل، دور على الموقع واضغط عليه مطولًا، ثم اختر إرسال 👇")
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("اسمع مني 🔊 شغّل GPS وبس اضغط إرسال موقعي 📍")
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
 
     # ✅ زر شرح الموقع الآن مرفق مع آخر رسالة
     inline_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+        [InlineKeyboardButton("عالسريع كيف ؟ 🔥", callback_data="how_to_send_location")]
     ])
     await update.message.reply_text(
         "ما بدا شي 😄\n👇 شوف شرح عسريع:",
@@ -1433,10 +1431,12 @@ async def ask_area_name(update: Update, context: CallbackContext) -> int:
     await update.message.reply_text("📍 شو اسم المنطقة أو الشارع الذي تسكن فيه ضمن مدينتك؟\n"
                                     "مثلاً: الزراعة، شارع القلعة، أو قرب مدرسة كذا...",
                                     reply_markup=reply_markup)
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("بدك تنتبه ! اذا كان موقعك ناقص او وهمي رح تنرفض طلبياتك 😥")
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("سجل موقعك منيح لمرة وحدة بس مشان تريح حالك بعدين 🙂")
+    await asyncio.sleep(0.5)
+    await update.message.reply_text("قربت تخلص 😁")
 
     return ASK_AREA_NAME
 
@@ -1451,8 +1451,10 @@ async def handle_area_name(update: Update, context: CallbackContext) -> int:
 
     reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
     await update.message.reply_text("وين بالضبط ؟ 🤨", reply_markup=reply_markup)
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
+    await asyncio.sleep(0.9)
+    await update.message.reply_text("خلصت هي اخر سؤال 😁")
 
     return ASK_DETAILED_LOCATION
 
@@ -1461,15 +1463,13 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
     reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
 
     await update.message.reply_text("وين بالضبط ؟ 🤨", reply_markup=reply_markup)
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await update.message.reply_text("تخيل نفسك تحكي مع الديليفري: بأي بناء؟ معلم مميز؟ بأي طابق؟ كيف يشوفك بسرعة؟")
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     await context.bot.send_sticker(
         chat_id=update.effective_chat.id,
         sticker="CAACAgIAAxkBAAEBxudoMx_S9YodkQJ2aFqbWagsExrgXgAC_g0AAoGJqEhLiXZ1bM9WgDYE"
     )
-    await asyncio.sleep(2)
-    await update.message.reply_text("خلصت هي اخر سؤال 😁")
 
     return ASK_DETAILED_LOCATION
 
@@ -1478,12 +1478,10 @@ async def ask_detailed_location(update: Update, context: CallbackContext) -> int
 async def confirm_info(update: Update, context: CallbackContext) -> int:
     if update.message.text == "عودة ➡️":
         context.user_data.pop('detailed_location', None)
-        return await ask_area_name(update, context)  # ✅ هذا فقط يكفي
+        return await ask_area_name(update, context)
 
-    # حفظ الوصف التفصيلي
     context.user_data['detailed_location'] = update.message.text
 
-    # استرجاع البيانات من المفاتيح الصحيحة
     name = context.user_data.get('name', 'غير متوفر')
     phone = context.user_data.get('phone', 'غير متوفر')
     province = context.user_data.get('province_name', 'غير متوفر')
@@ -1512,6 +1510,9 @@ async def confirm_info(update: Update, context: CallbackContext) -> int:
         chat_id=update.effective_chat.id,
         sticker="CAACAgIAAxkBAAEBxupoMyA2CN7ETdFf8JloOif7qOc1XQACXhIAAuyZKUl879mlR_dkOzYE"
     )
+
+    # ⏱️ تأخير بسيط قبل إرسال الموقع والمعلومات
+    await asyncio.sleep(0.5)
 
     if location_coords:
         latitude = location_coords.get('latitude')
@@ -1718,7 +1719,7 @@ async def ask_location_edit(update: Update, context: CallbackContext) -> int:
     reply_markup = ReplyKeyboardMarkup([[location_button], ["عودة ⬅️"]], resize_keyboard=True)
 
     inline_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+        [InlineKeyboardButton("عالسريع كيف ؟ 🔥", callback_data="how_to_send_location")]
     ])
 
     await update.message.reply_text("اختار إرسال موقعي إذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
@@ -1751,12 +1752,12 @@ async def ask_location_edit_entry(update: Update, context: CallbackContext) -> i
     ], resize_keyboard=True)
 
     inline_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("كيف أرسل موقعي عالسريع 🔥", callback_data="how_to_send_location")]
+        [InlineKeyboardButton("عالسريع كيف ؟ 🔥", callback_data="how_to_send_location")]
     ])
 
     await update.message.reply_text("اختار إرسال موقعي إذا كنت مفعل خدمة الموقع GPS 📍", reply_markup=reply_markup)
     await asyncio.sleep(2)
-    await update.message.reply_text("👇 إذا مو واضح فيك تشوف شرح سريع:", reply_markup=inline_markup)
+    await update.message.reply_text("اذا ما بتعرف تشغل لوكيشن", reply_markup=inline_markup)
 
     return EDIT_LOCATION
 
@@ -3024,7 +3025,7 @@ async def handle_order_notes(update: Update, context: CallbackContext) -> int:
     ], resize_keyboard=True)
 
     await update.message.reply_text(
-        "✅ تم سجلنا ملاحظاتك.\n\n"
+        "✅ تم \n\n"
         "ويينك هلا ؟",
         reply_markup=reply_markup
     )
@@ -3125,10 +3126,12 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         ], resize_keyboard=True)
 
         await update.message.reply_text(
-            f"📋 ملخص طلبك:\n{summary_text}\n\n"
-            f"💰 المجموع الكلي: {total_price} ل.س\n\n"
-            "شو حابب نعمل؟",
-            reply_markup=reply_markup
+            f"📋 *ملخص الطلب:*\n{summary_text}\n\n"
+            f"{location_text}\n"
+            f"💰 *المجموع:* {total_price} ل.س\n\n"
+            "صرنا جاهزين  منطلب ؟",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
         return CONFIRM_FINAL_ORDER
 
@@ -3158,17 +3161,17 @@ async def ask_new_location(update: Update, context: CallbackContext) -> int:
         reply_markup=reply_markup
     )
 # ⏱️ تأخير بسيط لإضفاء لمسة طبيعية
-    await asyncio.sleep(3)
+    await asyncio.sleep(0.5)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اذا ماكنت مفعل رح تضطر تدور عموقع و اضغط عليه مطولا بعدين اختار اسفل الشاشة الخيار المستطيل إرسال 👇")
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(0.5)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("اسماع مني ونزل البرداية وشغل خدمة الموقع الجغرافي او GPS وبس ارسال موقعي 📍")
 
-    await asyncio.sleep(3)
+    await asyncio.sleep(0.5)
 
     # 📨 الرسالة الثانية بعد ثانية
     await update.message.reply_text("ما بدا شي 😄")
