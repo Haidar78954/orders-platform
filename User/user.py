@@ -398,6 +398,42 @@ async def get_user_lock(user_id):
         user_state_lock[user_id] = Lock()
     return user_state_lock[user_id]
 
+async def get_next_order_number(restaurant_id: int) -> int:
+    try:
+        async with get_db_connection() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cursor:
+                    # قفل الصف
+                    await cursor.execute(
+                        "SELECT last_order_number FROM restaurant_order_counter WHERE restaurant_id = %s FOR UPDATE",
+                        (restaurant_id,)
+                    )
+                    result = await cursor.fetchone()
+
+                    if result is None:
+                        next_number = 1
+                        await cursor.execute(
+                            "INSERT INTO restaurant_order_counter (restaurant_id, last_order_number) VALUES (%s, %s)",
+                            (restaurant_id, next_number)
+                        )
+                    else:
+                        last_number = result[0]
+                        next_number = last_number + 1
+                        await cursor.execute(
+                            "UPDATE restaurant_order_counter SET last_order_number = %s WHERE restaurant_id = %s",
+                            (next_number, restaurant_id)
+                        )
+
+                await conn.commit()
+                return next_number
+            except Exception as e:
+                await conn.rollback()
+                logger.error(f"❌ خطأ أثناء توليد رقم الطلب: {e}")
+                raise
+    except Exception as e:
+        logger.error(f"❌ فشل الاتصال بقاعدة البيانات: {e}")
+        raise
 
 
 
@@ -3322,6 +3358,15 @@ async def handle_confirm_final_order(update: Update, context: CallbackContext) -
 async def process_confirm_final_order(update, context):
     choice = update.message.text
     user_id = update.effective_user.id
+   
+# 🛡️ حماية ضد الضغط المكرر
+    if context.user_data.get("is_order_processing"):
+        await update.message.reply_text("⏳ يتم تنفيذ طلبك حالياً، انتظر لحظة...")
+        return MAIN_MENU  # أو ConversationHandler.END حسب السياق
+    
+    # تفعيل القفل المؤقت
+    context.user_data["is_order_processing"] = True
+
 
     if choice == "يالله عالسريع 🔥":
         user_state = await get_conversation_state(user_id)
@@ -3329,6 +3374,7 @@ async def process_confirm_final_order(update, context):
 
         if not cart:
             await update.message.reply_text("❌ لا توجد وجبات في سلتك حالياً.")
+            context.user_data.pop("is_order_processing", None)
             return MAIN_MENU
 
         order_id = str(uuid.uuid4())
@@ -3376,6 +3422,23 @@ async def process_confirm_final_order(update, context):
             else:
                 db_detailed_location = db_location_text
 
+        last_order = context.user_data.get("last_order_signature")
+        signature_payload = {
+            "cart": cart,
+            "notes": user_state.get("order_notes") or context.user_data.get("order_notes", ""),
+            "restaurant": context.user_data.get("selected_restaurant")
+        }
+        current_signature = hashlib.md5(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
+
+        
+        if last_order == current_signature:
+            logger.warning("⚠️ تم منع تنفيذ طلب مكرر بنفس المحتوى.")
+            context.user_data.pop("is_order_processing", None)
+            return MAIN_MENU
+
+        context.user_data["last_order_signature"] = current_signature
+
+
         # ✅ استخدام الموقع المؤقت من context.user_data أولاً
         area_name = (
             context.user_data.get("temporary_area_name")
@@ -3409,6 +3472,7 @@ async def process_confirm_final_order(update, context):
         selected_restaurant = context.user_data.get("selected_restaurant")
         if not selected_restaurant:
             await update.message.reply_text("❌ لم يتم تحديد المطعم.")
+            context.user_data.pop("is_order_processing", None)
             return MAIN_MENU
 
         try:
@@ -3424,19 +3488,14 @@ async def process_confirm_final_order(update, context):
 
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على المطعم.")
+                        context.user_data.pop("is_order_processing", None)
                         return MAIN_MENU
 
                     restaurant_id, restaurant_channel, city_id = result
 
-                    await cursor.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant_id = %s", (restaurant_id,))
-                    counter_result = await cursor.fetchone()
+                    await asyncio.sleep(0.2)
 
-                    if counter_result:
-                        order_number = counter_result[0] + 1
-                        await cursor.execute("UPDATE restaurant_order_counter SET last_order_number = %s WHERE restaurant_id = %s", (order_number, restaurant_id))
-                    else:
-                        order_number = 1
-                        await cursor.execute("INSERT INTO restaurant_order_counter (restaurant_id, last_order_number) VALUES (%s, %s)", (restaurant_id, order_number))
+                    order_number = await get_next_order_number(restaurant_id)
 
                     await cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id) VALUES (%s, %s, %s, %s)", (order_id, user_id, restaurant_id, city_id))
 
@@ -3503,12 +3562,14 @@ async def process_confirm_final_order(update, context):
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxnFoMQZFcg7tO0yexYxhUK4JLJAc0gACZDQAAqVkGUp0aoPgoYfAATYE"
             )
+            context.user_data.pop("is_order_processing", None)
 
             return MAIN_MENU
 
         except Exception as e:
             logger.error(f"❌ خطأ أثناء تأكيد الطلب: {e}", exc_info=True)
             await update.message.reply_text("❌ حدث خطأ أثناء تأكيد الطلب. حاول لاحقاً.")
+            context.user_data.pop("is_order_processing", None)
             return MAIN_MENU
 
     elif choice == "لا ماني متأكد 😐":
@@ -3520,10 +3581,12 @@ async def process_confirm_final_order(update, context):
                 ["من نحن 🏢", "أسئلة متكررة ❓"]
             ], resize_keyboard=True)
         )
+        context.user_data.pop("is_order_processing", None)
         return MAIN_MENU
 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
+        context.user_data.pop("is_order_processing", None)
         return CONFIRM_FINAL_ORDER
 
 
