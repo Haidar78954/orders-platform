@@ -5085,6 +5085,66 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+# يمكنك وضع معرف القناة هنا (مثال: -1001234567890)
+DEVELOPER_CHAT_ID = -1002586617686  # 👈 ضع معرف قناتك هنا
+
+async def check_and_refresh_mysql():
+    """التحقق من أن الاتصال بقاعدة البيانات ما زال فعالًا"""
+    global pool
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT 1")
+                await cursor.fetchone()
+        logger.info("✅ اتصال MySQL سليم.")
+    except Exception as e:
+        logger.warning(f"⚠️ فقد الاتصال بقاعدة البيانات: {e}")
+
+        # محاولة إعادة الاتصال
+        try:
+            pool.close()
+            await pool.wait_closed()
+            logger.info("🔄 إعادة إنشاء اتصال MySQL...")
+
+            pool = await aiomysql.create_pool(
+                host=DB_HOST,
+                port=DB_PORT,
+                user=DB_USER,
+                password=DB_PASSWORD,
+                db=DB_NAME,
+                autocommit=True,
+                minsize=1,
+                maxsize=10,
+                pool_recycle=3600
+            )
+
+            logger.info("✅ تم إنشاء الاتصال الجديد بنجاح.")
+
+            # إرسال إشعار بالنجاح
+            if 'app' in globals():
+                await app.bot.send_message(
+                    chat_id=DEVELOPER_CHAT_ID,
+                    text="✅ تمت استعادة الاتصال بقاعدة البيانات بنجاح."
+                )
+
+        except Exception as err:
+            logger.error(f"❌ فشل في إعادة الاتصال بقاعدة البيانات: {err}")
+
+            # إرسال إشعار بالفشل
+            if 'app' in globals():
+                await app.bot.send_message(
+                    chat_id=DEVELOPER_CHAT_ID,
+                    text=f"❌ فشل في إعادة الاتصال بقاعدة البيانات:\n{err}"
+                )
+
+
+def schedule_mysql_watchdog(application):
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(lambda: asyncio.create_task(check_and_refresh_mysql()), "interval", minutes=5)
+    scheduler.start()
+
+
+
 
 
 
@@ -5323,6 +5383,7 @@ def extract_order_number(text):
             return int(match.group(1))
     return None
 
+
     
 
 def run_user_bot () :
@@ -5386,6 +5447,8 @@ def run_user_bot () :
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_order_counters, CronTrigger(hour=0, minute=0))
     scheduler.start()
+
+    schedule_mysql_watchdog(application)
 
     # تشغيل البوت
     application.run_polling()
