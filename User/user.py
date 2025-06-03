@@ -14,7 +14,7 @@ import math
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import unquote
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -5140,8 +5140,8 @@ async def check_and_refresh_mysql():
 
 
 def schedule_mysql_watchdog(application):
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: asyncio.create_task(check_and_refresh_mysql()), "interval", minutes=5)
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(check_and_refresh_mysql, "interval", minutes=5)
     scheduler.start()
 
 
