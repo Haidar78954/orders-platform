@@ -3356,19 +3356,24 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
 async def handle_confirm_final_order(update: Update, context: CallbackContext) -> int:
     return await process_confirm_final_order(update, context)
 
-
 async def process_confirm_final_order(update, context):
     choice = update.message.text
     user_id = update.effective_user.id
-   
-# 🛡️ حماية ضد الضغط المكرر
+
+    # 🛡️ حماية ضد الضغط المكرر أثناء التنفيذ
     if context.user_data.get("is_order_processing"):
         await update.message.reply_text("⏳ يتم تنفيذ طلبك حالياً، انتظر لحظة...")
-        return MAIN_MENU  # أو ConversationHandler.END حسب السياق
-    
+        return MAIN_MENU
+
+    # 🔒 حماية زمنية: منع الطلب المتكرر خلال 10 ثواني
+    last_order_time = context.user_data.get("last_order_timestamp")
+    now = datetime.now()
+    if last_order_time and (now - last_order_time).total_seconds() < 10:
+        await update.message.reply_text("⏳ لقد أرسلت طلباً للتو. انتظر قليلاً قبل إرسال طلب جديد.")
+        return MAIN_MENU
+
     # تفعيل القفل المؤقت
     context.user_data["is_order_processing"] = True
-
 
     if choice == "يالله عالسريع 🔥":
         user_state = await get_conversation_state(user_id)
@@ -3383,7 +3388,7 @@ async def process_confirm_final_order(update, context):
         logger.info(f"🔍 user_id: {user_id}, context.user_data: {context.user_data}")
 
         # جلب الاسم ورقم الهاتف
-        name, phone = None, None
+        name = phone = None
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
@@ -3403,11 +3408,7 @@ async def process_confirm_final_order(update, context):
         try:
             async with get_db_connection() as conn:
                 async with conn.cursor() as cursor:
-                    await cursor.execute("""
-                        SELECT location_text, latitude, longitude
-                        FROM user_data
-                        WHERE user_id = %s
-                    """, (user_id,))
+                    await cursor.execute("SELECT location_text, latitude, longitude FROM user_data WHERE user_id = %s", (user_id,))
                     result = await cursor.fetchone()
                     if result:
                         db_location_text, lat, lon = result
@@ -3416,7 +3417,6 @@ async def process_confirm_final_order(update, context):
         except Exception as e:
             logger.error(f"❌ خطأ أثناء جلب الموقع من قاعدة البيانات: {e}")
 
-        # تقسيم الموقع الأساسي إن وُجد
         db_area_name = db_detailed_location = None
         if db_location_text:
             if " - " in db_location_text:
@@ -3424,42 +3424,9 @@ async def process_confirm_final_order(update, context):
             else:
                 db_detailed_location = db_location_text
 
-        last_order = context.user_data.get("last_order_signature")
-        signature_payload = {
-            "cart": cart,
-            "notes": user_state.get("order_notes") or context.user_data.get("order_notes", ""),
-            "restaurant": context.user_data.get("selected_restaurant")
-        }
-        current_signature = hashlib.md5(json.dumps(signature_payload, sort_keys=True).encode()).hexdigest()
-
-        
-        if last_order == current_signature:
-            logger.warning("⚠️ تم منع تنفيذ طلب مكرر بنفس المحتوى.")
-            context.user_data.pop("is_order_processing", None)
-            return MAIN_MENU
-
-        context.user_data["last_order_signature"] = current_signature
-
-
-        # ✅ استخدام الموقع المؤقت من context.user_data أولاً
-        area_name = (
-            context.user_data.get("temporary_area_name")
-            or user_state.get("temporary_area_name")
-            or user_state.get("area_name")
-            or db_area_name
-        )
-        detailed_location = (
-            context.user_data.get("temporary_detailed_location")
-            or user_state.get("temporary_detailed_location")
-            or user_state.get("detailed_location")
-            or db_detailed_location
-        )
-        location_coords = (
-            context.user_data.get("temporary_location_coords")
-            or user_state.get("temporary_location_coords")
-            or user_state.get("location_coords")
-            or db_coords
-        )
+        area_name = context.user_data.get("temporary_area_name") or user_state.get("temporary_area_name") or user_state.get("area_name") or db_area_name
+        detailed_location = context.user_data.get("temporary_detailed_location") or user_state.get("temporary_detailed_location") or user_state.get("detailed_location") or db_detailed_location
+        location_coords = context.user_data.get("temporary_location_coords") or user_state.get("temporary_location_coords") or user_state.get("location_coords") or db_coords
 
         location_parts = []
         if area_name:
@@ -3487,7 +3454,6 @@ async def process_confirm_final_order(update, context):
                         WHERE r.name = %s
                     """, (selected_restaurant,))
                     result = await cursor.fetchone()
-
                     if not result:
                         await update.message.reply_text("❌ لم يتم العثور على المطعم.")
                         context.user_data.pop("is_order_processing", None)
@@ -3496,14 +3462,13 @@ async def process_confirm_final_order(update, context):
                     restaurant_id, restaurant_channel, city_id = result
 
                     await asyncio.sleep(0.2)
-
                     order_number = await get_next_order_number(restaurant_id)
 
                     await cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id) VALUES (%s, %s, %s, %s)", (order_id, user_id, restaurant_id, city_id))
 
                 await conn.commit()
 
-            # تجهيز عناصر السلة
+            # تجهيز الطلب
             summary_counter = defaultdict(int)
             for item in cart:
                 key = (item["name"], item["size"], item["price"])
@@ -3541,10 +3506,12 @@ async def process_confirm_final_order(update, context):
                 "order_id": order_id,
                 "order_number": order_number,
                 "selected_restaurant": selected_restaurant,
-                "timestamp": datetime.now(),
+                "timestamp": now,
                 "total_price": total_price
             }
 
+            # 🧼 تحديث توقيت الطلب الأخير
+            context.user_data["last_order_timestamp"] = now
             await delete_cart_from_db(user_id)
 
             reply_markup = ReplyKeyboardMarkup([
@@ -3560,12 +3527,13 @@ async def process_confirm_final_order(update, context):
                 f"رح يبعتلك الكاشير بس يبلشو 😉",
                 reply_markup=reply_markup
             )
+
             await context.bot.send_sticker(
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxnFoMQZFcg7tO0yexYxhUK4JLJAc0gACZDQAAqVkGUp0aoPgoYfAATYE"
             )
-            context.user_data.pop("is_order_processing", None)
 
+            context.user_data.pop("is_order_processing", None)
             return MAIN_MENU
 
         except Exception as e:
@@ -3590,7 +3558,6 @@ async def process_confirm_final_order(update, context):
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         context.user_data.pop("is_order_processing", None)
         return CONFIRM_FINAL_ORDER
-
 
 
 
