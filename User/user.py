@@ -14,6 +14,7 @@ import math
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import unquote
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
