@@ -2,6 +2,7 @@ import aiomysql
 import pymysql
 import asyncio
 import json
+import hashlib
 import time
 import sys
 import random
