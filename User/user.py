@@ -3107,16 +3107,14 @@ async def emergency_order_recovery(user_id, context):
 async def ask_order_location(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
-    
-    # استرجاع البيانات من قاعدة البيانات إذا لم تكن موجودة في context.user_data
+
     orders = context.user_data.get('orders', [])
     if not orders:
         orders = await get_cart_from_db(user_id)
         context.user_data['orders'] = orders
-    
+
     selected_restaurant = context.user_data.get('selected_restaurant')
     if not selected_restaurant:
-        # استرجاع اسم المطعم من قاعدة البيانات أو من حالة المحادثة
         try:
             state = await get_conversation_state(user_id)
             selected_restaurant = state.get('selected_restaurant')
@@ -3124,19 +3122,17 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
                 context.user_data['selected_restaurant'] = selected_restaurant
         except Exception as e:
             logger.error(f"❌ خطأ في استرجاع اسم المطعم: {e}")
-    
-    # ✅ تصحيح الطلبات القديمة
+
     if isinstance(orders, dict):
         orders = await fixed_orders_from_legacy_dict(orders)
         context.user_data["orders"] = orders
 
     if choice == "نفس الموقع يلي عطيتكن ياه بالاول 🌝":
-        # تحسين رسالة الخطأ وإضافة المزيد من المعلومات التشخيصية
         if not orders:
             logger.error(f"❌ لا توجد طلبات للمستخدم {user_id}")
             await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب: لا توجد وجبات في السلة.")
             return MAIN_MENU
-            
+
         if not selected_restaurant:
             logger.error(f"❌ لا يوجد مطعم محدد للمستخدم {user_id}")
             await update.message.reply_text("❌ حدث خطأ في استرجاع تفاصيل الطلب: لم يتم تحديد المطعم.")
@@ -3158,6 +3154,12 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         elif location_text:
             summary_text += f"\n\n🚚 رح نبعتلك طلبيتك عالسريع على:\n📍 {location_text}"
 
+        notes = context.user_data.get("order_notes")
+        if notes and notes.strip().lower() != "none":
+            summary_text += f"\n📝 *ملاحظات:* {notes.strip()}"
+        else:
+            summary_text += f"\n📝 لا يوجد ملاحظات."
+
         reply_markup = ReplyKeyboardMarkup([
             ["يالله عالسريع 🔥"],
             ["لا ماني متأكد 😐"]
@@ -3165,7 +3167,6 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
 
         await update.message.reply_text(
             f"📋 *ملخص الطلب:*\n{summary_text}\n\n"
-            f"{location_text}\n"
             f"💰 *المجموع:* {total_price} ل.س\n\n"
             "صرنا جاهزين  منطلب ؟",
             reply_markup=reply_markup,
@@ -3174,7 +3175,6 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
         return CONFIRM_FINAL_ORDER
 
     elif choice == "لاا أنا بمكان تاني 🌚":
-        # 🧭 بدء مسار تحديد الموقع الجديد - أولاً اسم المنطقة
         await update.message.reply_text(
             "🗺️ ما اسم المنطقة أو الشارع الذي تسكن فيه؟ (مثلاً: الزراعة - شارع القلعة)",
             reply_markup=ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
