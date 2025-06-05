@@ -3465,8 +3465,14 @@ async def process_confirm_final_order(update, context):
                     order_number = await get_next_order_number(restaurant_id)
 
                     await cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id) VALUES (%s, %s, %s, %s)", (order_id, user_id, restaurant_id, city_id))
+                    logger.info(f"📦 بيانات الإدخال: order_id={order_id}, user_id={user_id}, restaurant_id={restaurant_id}, city_id={city_id}")
 
                 await conn.commit()
+                logger.info("✅ تم تنفيذ commit بنجاح.")
+                await cursor.execute("SELECT * FROM user_orders WHERE order_id = %s", (order_id,))
+                row = await cursor.fetchone()
+                logger.info(f"🔍 تحقق من الإدخال: {row}")
+
 
             # تجهيز الطلب
             summary_counter = defaultdict(int)
@@ -3554,6 +3560,7 @@ async def process_confirm_final_order(update, context):
         )
         context.user_data.pop("is_order_processing", None)
         return MAIN_MENU
+        
 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
