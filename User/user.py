@@ -3574,7 +3574,7 @@ async def get_last_order(user_id):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT order_id, order_number, timestamp
+                    SELECT order_id, timestamp
                     FROM user_orders
                     WHERE user_id = %s
                     ORDER BY timestamp DESC
