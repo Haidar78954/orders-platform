@@ -5313,7 +5313,12 @@ def run_user_bot () :
 
     
     application.add_handler(CommandHandler("testimage", test_copy_image))
-    application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_remaining_time_for_order))
+   
+    application.add_handler(MessageHandler(
+    filters.ChatType.CHANNEL & filters.Regex(r"^\d{1,3}$"),
+    handle_remaining_time_for_order
+))
+
 
    
     # 2. رسائل الإلغاء بسبب شكوى (تتضمن "بسبب شكوى")
