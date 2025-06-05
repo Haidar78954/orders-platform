@@ -4952,60 +4952,6 @@ async def handle_ad_start(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 
-async def handle_delivery_assignment(update: Update, context: CallbackContext):
-    message = update.channel_post
-    if not message or not message.text:
-        return
-
-    text = message.text
-    logger.info(f"📦 تم استلام رسالة تسليم للدليفري:\n{text}")
-
-    # استخراج معرف الطلب من النص
-    match = re.search(r"معرف الطلب:\s*`?(\w+)`?", text)
-    if not match:
-        logger.warning("⚠️ لم يتم العثور على معرف الطلب.")
-        return
-
-    order_id = match.group(1)
-
-    try:
-        async with get_db_connection() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT user_id FROM user_orders WHERE order_id = %s", (order_id,))
-                row = await cursor.fetchone()
-
-        if not row:
-            logger.warning(f"⚠️ لم يتم العثور على مستخدم للطلب: {order_id}")
-            return
-
-        user_id = row[0]
-
-        # استخراج اسم الدليفري ورقمه من الرسالة
-        name_match = re.search(r"🛵 اسم الدليفري:\s*(.+)", text)
-        phone_match = re.search(r"📞 رقم الهاتف:\s*(\d+)", text)
-        delivery_name = name_match.group(1) if name_match else "غير معروف"
-        delivery_phone = phone_match.group(1) if phone_match else "غير متوفر"
-
-        # إرسال إشعار للمستخدم
-        msg = (
-            f"🚚 تم تسليم طلبك إلى الدليفري: {delivery_name}\n"
-            f"📞 يمكنك التواصل معه على الرقم: {delivery_phone}\n\n"
-            f"📌 *معرف طلبك:* `{order_id}`\n"
-            "نتمنى لك تجربة شهية وسريعة! 😋"
-        )
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=msg,
-            parse_mode="Markdown",
-            reply_markup=get_main_menu()
-        )
-
-        logger.info(f"✅ تم إعلام المستخدم {user_id} بأن الطلب مع الدليفري {delivery_name}")
-
-    except Exception as e:
-        logger.error(f"❌ خطأ في handle_delivery_assignment: {e}")
-
-
 
 
 
@@ -5360,12 +5306,7 @@ def run_user_bot () :
     application.add_handler(CommandHandler("testimage", test_copy_image))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_remaining_time_for_order))
 
-    # 1. رسائل تسليم الدليفري (تتضمن "🛵 اسم الدليفري:")
-    application.add_handler(MessageHandler(
-        filters.ChatType.CHANNEL & filters.Regex(r"🛵 اسم الدليفري:"),
-        handle_delivery_assignment
-    ))
-    
+   
     # 2. رسائل الإلغاء بسبب شكوى (تتضمن "بسبب شكوى")
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
