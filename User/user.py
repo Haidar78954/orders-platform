@@ -3470,9 +3470,9 @@ async def process_confirm_final_order(update, context):
                 await conn.commit()
                 logger.info("✅ تم تنفيذ commit بنجاح.")
                 async with conn.cursor() as cursor:
-                await cursor.execute("SELECT * FROM user_orders WHERE order_id = %s", (order_id,))
-                row = await cursor.fetchone()
-                logger.info(f"🔍 تحقق من الإدخال: {row}")
+                    await cursor.execute("SELECT * FROM user_orders WHERE order_id = %s", (order_id,))
+                    row = await cursor.fetchone()
+                    logger.info(f"🔍 تحقق من الإدخال: {row}")
 
 
             # تجهيز الطلب
