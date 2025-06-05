@@ -3575,13 +3575,12 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
     text = channel_post.text
     logger.info(f"📩 استلمنا رسالة جديدة من القناة: {text}")
 
-    # ✅ استخراج معرف الطلب
-    match = re.search(r"معرف الطلب:\s*([\w\d]+)", text)
-    if not match:
+    # ✅ استخراج معرف الطلب باستخدام الدالة الموحدة
+    order_id = extract_order_id(text)
+    if not order_id:
         logger.warning("⚠️ لم يتم العثور على معرف الطلب في الرسالة!")
         return
 
-    order_id = match.group(1)
     logger.info(f"🔍 البحث عن الطلب ID: {order_id}")
 
     try:
@@ -3607,7 +3606,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
             await context.bot.send_sticker(
-                chat_id=update.effective_chat.id,
+                chat_id=user_id,
                 sticker="CAACAgIAAxkBAAEBxxFoM2f1BDjNy-9ivZQXi9S_YqTLaAACSDsAAhNy-UgXWLa5FO4pTzYE"
             )
             reply_markup = ReplyKeyboardMarkup([
@@ -3625,11 +3624,10 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
 
         # ✅ حالة: قبول الطلب أو جاري تحضيره
         elif "تم قبول الطلب" in text or "جاري تحضير الطلب" in text:
-            # استخراج رقم الطلب ووقت التوصيل من النص
-            match_order_number = re.search(r"رقم الطلب:\s*(\d+)", text)
+            # استخراج رقم الطلب ووقت التوصيل من النص باستخدام الدالة الموحدة
+            order_number = extract_order_number(text)
             match_time = re.search(r"⏱️ وقت التوصيل المتوقع:\s*(\d+)\s*دقيقة", text)
         
-            order_number = match_order_number.group(1) if match_order_number else "غير معروف"
             delivery_time = match_time.group(1) if match_time else "غير محدد"
         
             message_text = (
@@ -3641,7 +3639,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
             await context.bot.send_sticker(
-                chat_id=update.effective_chat.id,
+                chat_id=user_id,
                 sticker="CAACAgIAAxkBAAEBxwtoM2b-lusvTTS2gHaC6p567Ri8QAAC6TkAAquXoElIPA20liWcHzYE"
             )
             reply_markup = ReplyKeyboardMarkup([
@@ -3675,7 +3673,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
             await context.bot.send_sticker(
-                chat_id=update.effective_chat.id,
+                chat_id=user_id,
                 sticker="CAACAgIAAxkBAAEBxw5oM2c2g216QRpeJjVncTYMihrQswACdhEAAsMAASlJLbkjGWa6Dog2BA"
             )
             await context.bot.send_message(
@@ -5258,20 +5256,22 @@ conv_handler = ConversationHandler(
 )
 
 
-
 ORDER_ID_PATTERNS = [
     r"معرف الطلب:?\s*[`\"']?([\w\d]+)[`\"']?",
-    r"🆔.*?[`\"']?([\w\d]+)[`\"']?",
+    r"🆔.*?معرف الطلب:?\s*[`\"']?([\w\d]+)[`\"']?",
+    r"🆔\s*معرف الطلب:\s*`([^`]+)`",  # تنسيق جديد
     r"order_id:?\s*[`\"']?([\w\d]+)[`\"']?"
 ]
 
 ORDER_NUMBER_PATTERNS = [
     r"رقم الطلب:?\s*[`\"']?(\d+)[`\"']?",
-    r"🔢.*?[`\"']?(\d+)[`\"']?",
+    r"🔢.*?رقم الطلب:?\s*[`\"']?(\d+)[`\"']?",
+    r"🔢\s*رقم الطلب:\s*`(\d+)`",  # تنسيق جديد
     r"order_number:?\s*[`\"']?(\d+)[`\"']?"
 ]
 
 def extract_order_id(text):
+    """استخراج معرف الطلب من النص"""
     for pattern in ORDER_ID_PATTERNS:
         match = re.search(pattern, text)
         if match:
@@ -5279,6 +5279,7 @@ def extract_order_id(text):
     return None
 
 def extract_order_number(text):
+    """استخراج رقم الطلب من النص"""
     for pattern in ORDER_NUMBER_PATTERNS:
         match = re.search(pattern, text)
         if match:
