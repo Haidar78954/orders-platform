@@ -3506,6 +3506,7 @@ async def process_confirm_final_order(update, context):
                 "order_id": order_id,
                 "order_number": order_number,
                 "selected_restaurant": selected_restaurant,
+                "channel_id": restaurant_channel,
                 "timestamp": now,
                 "total_price": total_price
             }
@@ -3953,18 +3954,12 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
             await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
             return MAIN_MENU
 
-        selected_restaurant = order_data.get("selected_restaurant")
-        order_number = order_data.get("order_number")
-        order_id = order_data.get("order_id")
+        order_id = order_data.get("order_id", "غير معروف")
+        order_number = order_data.get("order_number", "؟")
+        restaurant_channel = order_data.get("channel_id")
         user_name = update.effective_user.first_name or "مستخدم"
 
         context.user_data.pop("order_data", None)
-
-        # ✅ استعلام قناة المطعم
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
-        result = cursor.fetchone()
-        restaurant_channel = result[0] if result else None
 
         if restaurant_channel:
             cancellation_text = (
@@ -4000,6 +3995,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CANCEL_ORDER_OPTIONS
+
 
 
 
