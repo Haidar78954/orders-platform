@@ -3597,7 +3597,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
         user_id = user_result[0]
         logger.info(f"📩 سيتم إرسال رسالة إلى المستخدم: {user_id}")
 
-        # ✅ إعداد الرسالة والخيارات بناءً على نوع الإشعار
+        # ✅ حالة: رفض الطلب
         if "تم رفض الطلب" in text:
             message_text = (
                 "❌ *نعتذر، لم يتم قبول طلبك.*\n\n"
@@ -3610,7 +3610,6 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxxFoM2f1BDjNy-9ivZQXi9S_YqTLaAACSDsAAhNy-UgXWLa5FO4pTzYE"
             )
-
             reply_markup = ReplyKeyboardMarkup([
                 ["اطلب عالسريع 🔥"],
                 ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
@@ -3624,6 +3623,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 reply_markup=reply_markup
             )
 
+        # ✅ حالة: قبول الطلب أو جاري تحضيره
         elif "تم قبول الطلب" in text or "جاري تحضير الطلب" in text:
             message_text = (
                 "بسلم عليك المطعم 😄\n"
@@ -3635,14 +3635,19 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxwtoM2b-lusvTTS2gHaC6p567Ri8QAAC6TkAAquXoElIPA20liWcHzYE"
             )
-
+            reply_markup = ReplyKeyboardMarkup([
+                ["وصل طلبي شكرا لكم 🙏"],
+                ["إلغاء الطلب بسبب مشكلة 🫢"]
+            ], resize_keyboard=True)
 
             await context.bot.send_message(
                 chat_id=user_id,
                 text=message_text,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=reply_markup
             )
 
+        # ✅ حالة: الطلب جاهز للتوصيل
         elif "الطلب جاهز للتوصيل" in text:
             message_text = (
                 "🚚 *طلبك جاهز للتوصيل!*\n\n"
@@ -3653,16 +3658,30 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 chat_id=update.effective_chat.id,
                 sticker="CAACAgIAAxkBAAEBxw5oM2c2g216QRpeJjVncTYMihrQswACdhEAAsMAASlJLbkjGWa6Dog2BA"
             )
-
-
             await context.bot.send_message(
                 chat_id=user_id,
                 text=message_text,
                 parse_mode="Markdown"
             )
 
+        # ✅ حالة أخرى (تحديث عام)
+        else:
+            message_text = f"🍽️ *تحديث عن طلبك!*\n\n{text}"
+            reply_markup = ReplyKeyboardMarkup([
+                ["وصل طلبي شكرا لكم 🙏"],
+                ["إلغاء الطلب بسبب مشكلة 🫢"]
+            ], resize_keyboard=True)
+
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
+
     except Exception as e:
         logger.error(f"❌ خطأ أثناء معالجة تفاعل الكاشير: {e}")
+
 
 
 
@@ -4618,54 +4637,6 @@ async def send_rating_to_restaurant(bot, user_id, order_id, order_number, restau
 
 
 
-async def handle_order_rejection_notice(update: Update, context: CallbackContext):
-    message = update.channel_post
-    if not message or message.chat_id != CHANNEL_ID:
-        return
-
-    text = message.text or ""
-    if "تم رفض الطلب" not in text or "معرف الطلب" not in text:
-        return
-
-    logger.info(f"📩 تم استلام إشعار رفض طلب: {text}")
-
-    # استخراج معرف الطلب
-    match = re.search(r"معرف الطلب:\s*`?([\w\d]+)`?", text)
-    if not match:
-        logger.warning("⚠️ لم يتم استخراج معرف الطلب.")
-        return
-
-    order_id = match.group(1)
-    user_info = context.bot_data.get(order_id)
-
-    if not user_info:
-        logger.warning(f"⚠️ لم يتم العثور على بيانات المستخدم المرتبطة بالطلب: {order_id}")
-        return
-
-    user_id = user_info["user_id"]
-
-    # إعداد رسالة الرفض للمستخدم
-    reply_markup = ReplyKeyboardMarkup([
-        ["اطلب عالسريع 🔥"],
-        ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-        ["من نحن 🏢", "أسئلة متكررة ❓"]
-    ], resize_keyboard=True)
-
-    await context.bot.send_message(
-        chat_id=user_id,
-        text="🚫 تم رفض طلبك. يمكنك تعديل معلوماتك أو المحاولة من مطعم آخر.",
-        reply_markup=reply_markup
-    )
-    logger.info(f"📨 تم إرسال رسالة رفض الطلب للمستخدم: {user_id}")
-
-    # إزالة بيانات الطلب المؤقتة
-    context.bot_data.pop(order_id, None)
-
-
-
-
-
-
 async def handle_report_based_cancellation(update: Update, context: CallbackContext):
     """📩 يلتقط إشعار إلغاء الطلب بسبب شكوى ويرسل إشعار للمستخدم"""
 
@@ -5369,25 +5340,24 @@ def run_user_bot () :
     application.add_handler(CommandHandler("testimage", test_copy_image))
     application.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_remaining_time_for_order))
 
+    # 1. رسائل تسليم الدليفري (تتضمن "🛵 اسم الدليفري:")
     application.add_handler(MessageHandler(
-        filters.ChatType.CHANNEL & filters.Regex(r"تم تسليم الطلب.*معرف الطلب"),
+        filters.ChatType.CHANNEL & filters.Regex(r"🛵 اسم الدليفري:"),
         handle_delivery_assignment
     ))
     
+    # 2. رسائل الإلغاء بسبب شكوى (تتضمن "بسبب شكوى")
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.Regex(r"بسبب شكوى"),
         handle_report_based_cancellation
     ))
     
-    application.add_handler(MessageHandler(
-        filters.ChatType.CHANNEL & filters.Regex(r"تم رفض الطلب.*معرف الطلب"),
-        handle_order_rejection_notice
-    ))
-    
+    # 3. باقي الرسائل النصية من القناة (fallback handler)
     application.add_handler(MessageHandler(
         filters.ChatType.CHANNEL & filters.TEXT,
-        handle_cashier_interaction  # 🟥 هذا يجب أن يبقى أخيراً لأنه broad filter
+        handle_cashier_interaction
     ))
+
 
     application.add_handler(MessageHandler(
         filters.Chat(username="vip_ads_channel") & filters.Regex(r"/start vip_\\d+_\\d+"),
