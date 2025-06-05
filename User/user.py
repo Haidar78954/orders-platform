@@ -3465,7 +3465,11 @@ async def process_confirm_final_order(update, context):
                     await asyncio.sleep(0.2)
                     order_number = await get_next_order_number(restaurant_id)
 
-                    await cursor.execute("INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id) VALUES (%s, %s, %s, %s)", (order_id, user_id, restaurant_id, city_id))
+                    await cursor.execute("""
+                        INSERT INTO user_orders (order_id, user_id, restaurant_id, city_id, order_number)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (order_id, user_id, restaurant_id, city_id, order_number))
+
                     logger.info(f"📦 بيانات الإدخال: order_id={order_id}, user_id={user_id}, restaurant_id={restaurant_id}, city_id={city_id}")
 
                 await conn.commit()
@@ -4613,21 +4617,25 @@ async def receive_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ASK_RATING_COMMENT
 
+
 async def handle_rating_comment(update: Update, context: CallbackContext) -> int:
-    comment = update.message.text
-    if comment == "تخطي التعليق":
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    # التعامل مع خيار "حلو عني 😎"
+    if text == "حلو عني 😎":
         comment = None  # تقييم بدون تعليق
+    else:
+        comment = text  # تعليق فعلي
 
     rating = context.user_data.get('temp_rating') or 0
-    user_id = update.effective_user.id
 
-    # محاولة استخراج البيانات من user_data أو قاعدة المحادثة
+    # محاولة استخراج بيانات الطلب
     order_data = context.user_data.get("order_data", {})
     restaurant_id = order_data.get("restaurant_id")
     order_id = order_data.get("order_id")
     order_number = order_data.get("order_number")
 
-    # إذا لم توجد بيانات، نحاول من قاعدة المحادثة (لـ request_rating)
     if not all([restaurant_id, order_id, order_number]):
         try:
             state = await get_conversation_state(user_id)
@@ -4635,8 +4643,8 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
             order_id = order_id or state.get("rating_order_id")
             order_number = order_number or state.get("rating_order_number")
             rating = rating or state.get("rating_stars")
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"❌ خطأ أثناء جلب بيانات التقييم: {e}")
 
     if not all([restaurant_id, order_id, order_number, rating]):
         await update.message.reply_text("❌ لم نتمكن من إرسال التقييم. يرجى المحاولة لاحقاً.")
@@ -4652,12 +4660,22 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
         comment=comment
     )
 
+    reply_markup = ReplyKeyboardMarkup([
+        ["اطلب عالسريع 🔥"],
+        ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+        ["من نحن 🏢", "أسئلة متكررة ❓"]
+    ], resize_keyboard=True)
+
     if success:
-        await update.message.reply_text("✅ تم إرسال تقييمك، شكرًا لملاحظاتك!", reply_markup=main_menu_keyboard)
+        if comment is None:
+            await update.message.reply_text("حلينا 😒 رجعناك للقائمة الرئيسية.", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text("شكرا يا قلبي ❤️", reply_markup=reply_markup)
     else:
-        await update.message.reply_text("❌ فشل في إرسال التقييم. يرجى المحاولة لاحقاً.", reply_markup=main_menu_keyboard)
+        await update.message.reply_text("❌ فشل في إرسال التقييم. يرجى المحاولة لاحقاً.", reply_markup=reply_markup)
 
     return MAIN_MENU
+
 
 
 
