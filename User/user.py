@@ -4257,45 +4257,45 @@ async def handle_return_and_wait(update: Update, context: CallbackContext) -> in
 
 
 
-
-
 async def handle_reminder_order_request(update: Update, context: CallbackContext) -> int:
     """
     معالجة خيار 'تذكير المطعم بطلبي 👋' مع التأكد من إبقاء الخيارات الأخرى فعالة.
     """
-    # التحقق من بيانات الطلب
     order_data = context.user_data.get("order_data")
-
-    # إضافة سجل للتحقق من البيانات
     logging.info(f"user_data: {context.user_data}")
 
     if not order_data:
         await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب. يرجى التأكد من أنك قمت بتأكيد الطلب مسبقًا.")
         return CANCEL_ORDER_OPTIONS
 
-    # التحقق من مرور وقت كافٍ للتذكير (15 دقيقة)
     now = datetime.now()
     last_reminder_request_time = context.user_data.get("last_reminder_request_time")
 
     if last_reminder_request_time:
-        time_elapsed = (now - last_reminder_request_time).total_seconds() / 60  # بالدقائق
+        time_elapsed = (now - last_reminder_request_time).total_seconds() / 60
         if time_elapsed < 15:
             await update.message.reply_text(
-                f"❌ لا يمكنك تذكير المطعم إلا مرة واحدة كل 15 دقيقة. "
+                f"❌ لا يمكنك تذكير المطعم إلا مرة كل 15 دقيقة. "
                 f"يرجى المحاولة بعد {15 - int(time_elapsed)} دقيقة."
             )
             return CANCEL_ORDER_OPTIONS
 
-    # تحديث وقت آخر تذكير
     context.user_data["last_reminder_request_time"] = now
 
-    # إرسال رسالة التذكير إلى المطعم
     order_number = order_data.get("order_number")
     selected_restaurant = order_data.get("selected_restaurant")
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
-    result = cursor.fetchone()
-    restaurant_channel = result[0] if result else None
+    restaurant_channel = None
+
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT channel FROM restaurants WHERE name = %s", (selected_restaurant,))
+                result = await cursor.fetchone()
+                restaurant_channel = result[0] if result else None
+    except Exception as e:
+        logging.error(f"❌ خطأ أثناء جلب قناة المطعم: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء التحقق من قناة المطعم.")
+        return CANCEL_ORDER_OPTIONS
 
     if restaurant_channel:
         try:
@@ -4306,23 +4306,18 @@ async def handle_reminder_order_request(update: Update, context: CallbackContext
             )
             await update.message.reply_text("✅ تم إرسال التذكير للمطعم بنجاح! شكراً لتواصلك معنا.")
         except Exception as e:
-            logging.error(f"خطأ أثناء إرسال رسالة التذكير: {e}")
+            logging.error(f"❌ خطأ أثناء إرسال رسالة التذكير: {e}")
             await update.message.reply_text("❌ حدث خطأ أثناء إرسال التذكير. يرجى المحاولة مرة أخرى.")
     else:
         await update.message.reply_text("❌ لم يتم العثور على قناة المطعم.")
-        logging.error(f"القناة غير موجودة للمطعم: {selected_restaurant}")
+        logging.error(f"❌ القناة غير موجودة للمطعم: {selected_restaurant}")
 
-    # إعادة عرض الخيارات للمستخدم
     reply_markup = ReplyKeyboardMarkup([
         ["تذكير المطعم بطلبي 👋", "كم يتبقى لطلبي"],
         ["إلغاء وإرسال تقرير ❌", "العودة والانتظار 🙃"]
     ], resize_keyboard=True)
-    await update.message.reply_text(
-        "🔄 اختر أحد الخيارات المتاحة:",
-        reply_markup=reply_markup
-    )
 
-    # الإبقاء على نفس الحالة لتفعيل الخيارات
+    await update.message.reply_text("🔄 اختر أحد الخيارات المتاحة:", reply_markup=reply_markup)
     return CANCEL_ORDER_OPTIONS
 
 
@@ -4372,38 +4367,39 @@ async def ask_remaining_time(update: Update, context: CallbackContext) -> int:
 
 
 # ✅ دالة مساعدة موحدة لإرسال طلب "كم يتبقى؟"
+# ✅ دالة مساعدة موحدة لإرسال طلب "كم يتبقى؟"
 async def send_remaining_time_request_to_channel(context, user_id, order_number, selected_restaurant, reply_to=None):
     try:
-        cursor = db_conn.cursor()
-        cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
-        result = cursor.fetchone()
-        restaurant_channel = result[0] if result else None
+        restaurant_channel = None
+
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT channel FROM restaurants WHERE name = %s", (selected_restaurant,))
+                result = await cursor.fetchone()
+                restaurant_channel = result[0] if result else None
 
         if not restaurant_channel:
             return False, "❌ لم يتم العثور على قناة المطعم."
 
-        # إرسال الطلب
         message = await context.bot.send_message(
             chat_id=restaurant_channel,
             text=f"🔔 كم يتبقى لتحضير الطلب رقم {order_number}؟",
-            reply_to_message_id=reply_to  # مفيد إذا احتجت الرد
+            reply_to_message_id=reply_to
         )
 
-        # تخزين العلاقة لربط الرد بالمستخدم
         context.bot_data[message.message_id] = {
             "user_id": user_id,
             "order_number": order_number,
             "selected_restaurant": selected_restaurant,
         }
 
-        # تذكير بعد 5 دقائق
         asyncio.create_task(remind_cashier_after_delay(context, message.message_id, restaurant_channel))
-
         return True, None
 
     except Exception as e:
         logging.error(f"❌ فشل في إرسال طلب 'كم يتبقى؟' إلى قناة المطعم {selected_restaurant}: {e}")
         return False, "❌ حدث خطأ أثناء إرسال الطلب إلى المطعم."
+
 
 
 
