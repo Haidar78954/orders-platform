@@ -242,7 +242,8 @@ def initialize_database():
             user_id BIGINT NOT NULL,
             restaurant_id INT NOT NULL,
             city_id INT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            order_number INT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES user_data(user_id) ON DELETE CASCADE,
             FOREIGN KEY (restaurant_id) REFERENCES restaurants(id) ON DELETE CASCADE,
             FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE CASCADE
@@ -3574,10 +3575,11 @@ async def get_last_order(user_id):
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute("""
-                    SELECT order_id, timestamp
-                    FROM user_orders
-                    WHERE user_id = %s
-                    ORDER BY timestamp DESC
+                    SELECT o.order_id, o.order_number, o.timestamp, o.restaurant_id, r.name
+                    FROM user_orders o
+                    JOIN restaurants r ON o.restaurant_id = r.id
+                    WHERE o.user_id = %s
+                    ORDER BY o.timestamp DESC
                     LIMIT 1
                 """, (user_id,))
                 row = await cursor.fetchone()
@@ -3585,8 +3587,11 @@ async def get_last_order(user_id):
                     return {
                         "order_id": row[0],
                         "order_number": row[1],
-                        "timestamp": row[2]
+                        "timestamp": row[2],
+                        "restaurant_id": row[3],
+                        "restaurant_name": row[4]
                     }
+
     except Exception as e:
         logger.error(f"❌ خطأ في get_last_order: {e}")
     return None
@@ -4304,7 +4309,7 @@ async def handle_reminder_order_request(update: Update, context: CallbackContext
                 text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. "
                      f"نرجو الاستعجال في التحضير 🙏."
             )
-            await update.message.reply_text("✅ تم إرسال التذكير للمطعم بنجاح! شكراً لتواصلك معنا.")
+            await update.message.reply_text("وصل 😁ِ")
         except Exception as e:
             logging.error(f"❌ خطأ أثناء إرسال رسالة التذكير: {e}")
             await update.message.reply_text("❌ حدث خطأ أثناء إرسال التذكير. يرجى المحاولة مرة أخرى.")
@@ -4455,7 +4460,7 @@ async def handle_remaining_time_for_order(update: Update, context: CallbackConte
         )
 
         if success:
-            await update.message.reply_text("✅ سألتلك ياهن قديش بدو طلبك، ناطر منن جواب 😁")
+            await update.message.reply_text(" سألتلك ياهن قدي بدو طلبك، ناطر منن جواب 😁")
         else:
             await update.message.reply_text(error_message or "❌ حدث خطأ أثناء إرسال الطلب.")
 
