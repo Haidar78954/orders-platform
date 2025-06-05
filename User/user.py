@@ -4409,30 +4409,34 @@ async def handle_remaining_time_for_order(update: Update, context: CallbackConte
         return
 
     # 2️⃣ إذا كانت الرسالة من المستخدم في المحادثة
-    user_id = update.effective_user.id
-    order_data = context.user_data.get("order_data", {})
-    order_number = order_data.get("order_number")
-    selected_restaurant = order_data.get("selected_restaurant")
+    if update.effective_user:  # تحقق من وجود effective_user قبل الوصول إلى id
+        user_id = update.effective_user.id
+        order_data = context.user_data.get("order_data", {})
+        order_number = order_data.get("order_number")
+        selected_restaurant = order_data.get("selected_restaurant")
 
-    if not order_number or not selected_restaurant:
-        await update.message.reply_text("❌ لا يمكن العثور على رقم الطلب. يرجى المحاولة مرة أخرى.")
-        return MAIN_MENU
+        if not order_number or not selected_restaurant:
+            await update.message.reply_text("❌ لا يمكن العثور على رقم الطلب. يرجى المحاولة مرة أخرى.")
+            return MAIN_MENU
 
-    # ✅ استخدام الدالة الموحدة للإرسال
-    success, error_message = await send_remaining_time_request_to_channel(
-        context=context,
-        user_id=user_id,
-        order_number=order_number,
-        selected_restaurant=selected_restaurant
-    )
+        # ✅ استخدام الدالة الموحدة للإرسال
+        success, error_message = await send_remaining_time_request_to_channel(
+            context=context,
+            user_id=user_id,
+            order_number=order_number,
+            selected_restaurant=selected_restaurant
+        )
 
-    if success:
-        await update.message.reply_text("✅ سألتلك ياهن قديش بدو طلبك، ناطر منن جواب 😁")
-    else:
-        await update.message.reply_text(error_message or "❌ حدث خطأ أثناء إرسال الطلب.")
+        if success:
+            await update.message.reply_text("✅ سألتلك ياهن قديش بدو طلبك، ناطر منن جواب 😁")
+        else:
+            await update.message.reply_text(error_message or "❌ حدث خطأ أثناء إرسال الطلب.")
 
-    return CANCEL_ORDER_OPTIONS
-
+        return CANCEL_ORDER_OPTIONS
+    
+    # إذا لم يكن هناك effective_user ولا channel_post.reply_to_message
+    logging.warning("⚠️ تم استدعاء handle_remaining_time_for_order بدون effective_user أو channel_post.reply_to_message")
+    return
 
 
 
