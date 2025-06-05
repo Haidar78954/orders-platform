@@ -3569,6 +3569,27 @@ async def process_confirm_final_order(update, context):
         return CONFIRM_FINAL_ORDER
 
 
+async def get_last_order(user_id):
+    try:
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT order_id, order_number, timestamp
+                    FROM user_orders
+                    WHERE user_id = %s
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                """, (user_id,))
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        "order_id": row[0],
+                        "order_number": row[1],
+                        "timestamp": row[2]
+                    }
+    except Exception as e:
+        logger.error(f"❌ خطأ في get_last_order: {e}")
+    return None
 
 
 
