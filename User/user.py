@@ -3566,6 +3566,8 @@ async def process_confirm_final_order(update, context):
 
 
 async def handle_cashier_interaction(update: Update, context: CallbackContext) -> None:
+    logger.info("🚨 دخلنا فعليًا دالة handle_cashier_interaction")
+
     """📩 يلتقط رد الكاشير من القناة ويحدد المستخدم صاحب الطلب لإرسال الإشعار إليه"""
 
     channel_post = update.channel_post
@@ -5279,7 +5281,9 @@ def extract_order_id(text):
     for pattern in ORDER_ID_PATTERNS:
         match = re.search(pattern, text)
         if match:
+            logger.info(f"🎯 تم التطابق مع: {pattern}")
             return match.group(1)
+    logger.warning(f"⚠️ لم يتم استخراج معرف الطلب من:\n{text}")
     return None
 
 def extract_order_number(text):
