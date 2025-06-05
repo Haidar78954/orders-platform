@@ -4518,22 +4518,39 @@ async def show_relevant_ads(update: Update, context: CallbackContext):
 
 
 async def handle_order_received(update: Update, context: CallbackContext) -> int:
-    # 🧹 تنظيف بيانات الطلب
+    user_id = update.effective_user.id
+
+    # 🧹 تنظيف بيانات قديمة
     for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
         context.user_data.pop(key, None)
 
-    # حفظ حالة أن هذا التقييم جاء بعد التسليم
     context.user_data['came_from_delivery'] = True
 
-    # عرض خيارات التقييم مع زر تخطي كامل
+    # 🔍 جلب الطلب الأخير للمستخدم
+    order_info = await get_last_order(user_id)
+    if not order_info:
+        await update.message.reply_text("❌ لم نعثر على طلب سابق لتقييمه.")
+        return MAIN_MENU
+
+    # حفظ البيانات داخل user_data لمرحلة التعليق لاحقًا
+    context.user_data["order_data"] = {
+        "order_id": order_info["order_id"],
+        "order_number": order_info["order_number"],
+        "restaurant_id": order_info["restaurant_id"],
+        "restaurant_name": order_info["restaurant_name"]
+    }
+
+    context.user_data["temp_rating"] = None  # نهيئها لتخزين عدد النجوم لاحقًا
+
+    # عرض خيارات التقييم
     reply_markup = ReplyKeyboardMarkup([
-    ["⭐", "⭐⭐", "⭐⭐⭐"],
-    ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-    ["تخطي ⏭️"]
-], resize_keyboard=True)
+        ["⭐", "⭐⭐", "⭐⭐⭐"],
+        ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+        ["تخطي ⏭️"]
+    ], resize_keyboard=True)
 
     await update.message.reply_text(
-        "✨ كيف كانت تجربتك مع هذا المطعم؟\n"
+        f"✨ كيف كانت تجربتك مع مطعم {order_info['restaurant_name']}؟\n"
         "يرجى اختيار عدد النجوم للتقييم، أو اختر 'تخطي ⏭️' إذا لا ترغب بالتقييم.",
         reply_markup=reply_markup
     )
