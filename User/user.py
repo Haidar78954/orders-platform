@@ -4009,10 +4009,9 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
 
 
 
-
-
 async def handle_final_cancellation(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
+    user_id = update.effective_user.id
 
     if choice == "تأخرو كتير إلغاء عالسريع 😡":
         reply_markup = ReplyKeyboardMarkup([
@@ -4034,10 +4033,25 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
         order_id = order_data.get("order_id", "غير معروف")
         order_number = order_data.get("order_number", "؟")
         restaurant_channel = order_data.get("channel_id")
+        restaurant_id = order_data.get("restaurant_id")
         user_name = update.effective_user.first_name or "مستخدم"
 
+        # نحذف البيانات من السياق
         context.user_data.pop("order_data", None)
 
+        # محاولة جلب القناة من قاعدة البيانات إذا لم تكن موجودة
+        if not restaurant_channel and restaurant_id:
+            try:
+                async with get_db_connection() as conn:
+                    async with conn.cursor() as cursor:
+                        await cursor.execute("SELECT channel FROM restaurants WHERE id = %s", (restaurant_id,))
+                        result = await cursor.fetchone()
+                        if result:
+                            restaurant_channel = result[0]
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء جلب قناة المطعم: {e}")
+
+        # إرسال إشعار الإلغاء
         if restaurant_channel:
             cancellation_text = (
                 f"🚫 تم إلغاء الطلب رقم {order_number} من قبل الزبون.\n"
@@ -4063,17 +4077,12 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
             ["إلغاء ❌ بدي عدل"],
             ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
         ], resize_keyboard=True)
-        await update.message.reply_text(
-            "صبرك الله 😄",
-            reply_markup=reply_markup
-        )
+        await update.message.reply_text("صبرك الله 😄", reply_markup=reply_markup)
         return MAIN_MENU
 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CANCEL_ORDER_OPTIONS
-
-
 
 
 
