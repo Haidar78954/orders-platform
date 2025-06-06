@@ -3982,27 +3982,33 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
     order_number = order_data.get("order_number")
     selected_restaurant = order_data.get("selected_restaurant")
 
-    cursor = db_conn.cursor()
+    try:
+        # استخدام get_db_connection بدلاً من db_conn
+        async with get_db_connection() as conn:
+            async with conn.cursor() as cursor:
+                # تأكد من وجود المطعم في جدول العدادات
+                await cursor.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant = %s", (selected_restaurant,))
+                if not await cursor.fetchone():
+                    await cursor.execute("INSERT INTO restaurant_order_counter (restaurant, last_order_number) VALUES (%s, %s)", (selected_restaurant, 0))
+                    await conn.commit()
 
-    # ✅ تأكد من وجود المطعم في جدول العدادات
-    cursor.execute("SELECT last_order_number FROM restaurant_order_counter WHERE restaurant = ?", (selected_restaurant,))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO restaurant_order_counter (restaurant, last_order_number) VALUES (?, ?)", (selected_restaurant, 0))
-        db_conn.commit()
+                # جلب قناة المطعم
+                await cursor.execute("SELECT channel FROM restaurants WHERE name = %s", (selected_restaurant,))
+                result = await cursor.fetchone()
+                restaurant_channel = result[0] if result else None
 
-    # ✅ جلب قناة المطعم
-    cursor.execute("SELECT channel FROM restaurants WHERE name = ?", (selected_restaurant,))
-    result = cursor.fetchone()
-    restaurant_channel = result[0] if result else None
+        if restaurant_channel and order_number:
+            await context.bot.send_message(
+                chat_id=restaurant_channel,
+                text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. نرجو الاستعجال في الموافقة على الطلب فورا !! 🙏.",
+            )
+            await update.message.reply_text("حكينالك ياه لازم يستحي ع دمه 🤨")
+        else:
+            await update.message.reply_text("❌ لم يتم العثور على قناة المطعم أو رقم الطلب.")
 
-    if restaurant_channel and order_number:
-        await context.bot.send_message(
-            chat_id=restaurant_channel,
-            text=f"🔔 تذكير من الزبون: الطلب رقم {order_number} قيد الانتظار. نرجو الاستعجال في الموافقة على الطلب فورا !! 🙏.",
-        )
-        await update.message.reply_text("حكينالك ياه لازم يستحي ع دمه 🤨")
-    else:
-        await update.message.reply_text("❌ لم يتم العثور على قناة المطعم أو رقم الطلب.")
+    except Exception as e:
+        logger.error(f"❌ خطأ أثناء تنفيذ الطلب: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى لاحقاً.")
 
     return MAIN_MENU
 
@@ -4014,6 +4020,20 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     user_id = update.effective_user.id
 
     if choice == "تأخرو كتير إلغاء عالسريع 😡":
+        # التحقق من وجود بيانات الطلب قبل عرض خيارات التأكيد
+        order_data = context.user_data.get("order_data")
+        if not order_data:
+            await update.message.reply_text("❌ لم يتم تحديد طلب لإلغائه. يرجى التأكد من أنك قمت بتأكيد الطلب مسبقاً.")
+            # العودة إلى القائمة الرئيسية
+            reply_markup = ReplyKeyboardMarkup([
+                ["اطلب عالسريع 🔥"],
+                ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+                ["من نحن 🏢", "أسئلة متكررة ❓"]
+            ], resize_keyboard=True)
+            await update.message.reply_text("تم العودة إلى القائمة الرئيسية", reply_markup=reply_markup)
+            return MAIN_MENU
+            
+        # إذا وجدت بيانات الطلب، نعرض خيارات التأكيد
         reply_markup = ReplyKeyboardMarkup([
             ["اي اي متاكد 🥱"],
             ["لا خلص منرجع ومننتظر 🥲"]
@@ -4027,9 +4047,17 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     elif choice == "اي اي متاكد 🥱":
         order_data = context.user_data.get("order_data")
         if not order_data:
-            await update.message.reply_text("❌ لا يمكن العثور على تفاصيل الطلب.")
+            await update.message.reply_text("❌ لم يتم تحديد طلب لإلغائه.")
+            # العودة إلى القائمة الرئيسية
+            reply_markup = ReplyKeyboardMarkup([
+                ["اطلب عالسريع 🔥"],
+                ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+                ["من نحن 🏢", "أسئلة متكررة ❓"]
+            ], resize_keyboard=True)
+            await update.message.reply_text("تم العودة إلى القائمة الرئيسية", reply_markup=reply_markup)
             return MAIN_MENU
 
+        # باقي الكود كما هو...
         order_id = order_data.get("order_id", "غير معروف")
         order_number = order_data.get("order_number", "؟")
         restaurant_channel = order_data.get("channel_id")
@@ -4061,15 +4089,26 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
                 f"يرجى الانتباه في المرات القادمة.\n"
                 f"نحن سنعتذر منه وندعوه للطلب لاحقًا بسبب ضغط الطلبات."
             )
-            await context.bot.send_message(
-                chat_id=restaurant_channel,
-                text=cancellation_text,
-                parse_mode="Markdown"
-            )
-            await update.message.reply_text("ألغينالك الطلب ، اذا في مشكلة حكينا 🫠")
+            try:
+                await context.bot.send_message(
+                    chat_id=restaurant_channel,
+                    text=cancellation_text,
+                    parse_mode="Markdown"
+                )
+                await update.message.reply_text("ألغينالك الطلب ، اذا في مشكلة حكينا 🫠")
+            except Exception as e:
+                logger.error(f"❌ خطأ أثناء إرسال إشعار الإلغاء: {e}")
+                await update.message.reply_text("❌ حدث خطأ أثناء إلغاء الطلب. يرجى المحاولة مرة أخرى.")
         else:
             await update.message.reply_text("❌ لم يتم العثور على قناة المطعم.")
 
+        # العودة إلى القائمة الرئيسية
+        reply_markup = ReplyKeyboardMarkup([
+            ["اطلب عالسريع 🔥"],
+            ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+            ["من نحن 🏢", "أسئلة متكررة ❓"]
+        ], resize_keyboard=True)
+        await update.message.reply_text("تم العودة إلى القائمة الرئيسية", reply_markup=reply_markup)
         return MAIN_MENU
 
     elif choice == "لا خلص منرجع ومننتظر 🥲":
@@ -4083,6 +4122,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
         return CANCEL_ORDER_OPTIONS
+
 
 
 
@@ -4525,23 +4565,17 @@ async def show_relevant_ads(update: Update, context: CallbackContext):
         await update.message.reply_text(ad[0])
 
 
-
 async def handle_order_received(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
-
-    # 🧹 تنظيف بيانات قديمة
     for key in ['order_data', 'orders', 'selected_restaurant', 'temporary_total_price', 'order_notes']:
         context.user_data.pop(key, None)
-
     context.user_data['came_from_delivery'] = True
 
-    # 🔍 جلب الطلب الأخير للمستخدم
     order_info = await get_last_order(user_id)
     if not order_info:
         await update.message.reply_text("❌ لم نعثر على طلب سابق لتقييمه.")
         return MAIN_MENU
 
-    # حفظ البيانات داخل user_data لمرحلة التعليق لاحقًا
     context.user_data["order_data"] = {
         "order_id": order_info["order_id"],
         "order_number": order_info["order_number"],
@@ -4549,9 +4583,8 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
         "restaurant_name": order_info["restaurant_name"]
     }
 
-    context.user_data["temp_rating"] = None  # نهيئها لتخزين عدد النجوم لاحقًا
+    context.user_data["temp_rating"] = None
 
-    # عرض خيارات التقييم
     reply_markup = ReplyKeyboardMarkup([
         ["⭐", "⭐⭐", "⭐⭐⭐"],
         ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
@@ -4560,7 +4593,7 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
 
     await update.message.reply_text(
         f"✨ كيف كانت تجربتك مع مطعم {order_info['restaurant_name']}؟\n"
-        "يرجى اختيار عدد النجوم للتقييم، أو اختر 'تخطي ⏭️' إذا لا ترغب بالتقييم.",
+        "يرجى اختيار عدد النجوم للتقييم، أو اختر 'حلو عني 😒' لتخطي التقييم.",
         reply_markup=reply_markup
     )
 
@@ -4568,15 +4601,14 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
 
 
 async def handle_rating(update: Update, context: CallbackContext) -> int:
-    rating_text = update.message.text
+    text = update.message.text
 
-    if rating_text == "حلو عني 😒":
-        # لا شيء يُرسل، فقط العودة إلى القائمة الرئيسية
+    if text == "حلو عني 😒":
         await update.message.reply_text("ماشي 😔", reply_markup=main_menu_keyboard)
         return MAIN_MENU
 
     rating_map = {"⭐": 1, "⭐⭐": 2, "⭐⭐⭐": 3, "⭐⭐⭐⭐": 4, "⭐⭐⭐⭐⭐": 5}
-    rating = rating_map.get(rating_text, 0)
+    rating = rating_map.get(text, 0)
 
     if rating == 0:
         await update.message.reply_text("❌ يرجى اختيار تقييم صحيح من القائمة.")
@@ -4584,13 +4616,13 @@ async def handle_rating(update: Update, context: CallbackContext) -> int:
 
     context.user_data['temp_rating'] = rating
 
-    reply_markup = ReplyKeyboardMarkup([["تخطي التعليق"]], resize_keyboard=True)
+    reply_markup = ReplyKeyboardMarkup([["حلو عني 😒"]], resize_keyboard=True)
     await update.message.reply_text(
-        "شكراً على تقييمك! 🙏\nهل ترغب بترك تعليق لتحسين الخدمة؟",
+        "شكراً على تقييمك! 🙏\nهل ترغب بترك تعليق لتحسين الخدمة؟ (أو اختر 'حلو عني 😒' لتخطي التعليق)",
         reply_markup=reply_markup
     )
-
     return ASK_RATING_COMMENT
+
 
 
 
@@ -4632,36 +4664,14 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-async def receive_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text
-
-    
-    rating = len(text)
-    await update_conversation_state(user_id, "rating_stars", rating)
-
-    reply_markup = ReplyKeyboardMarkup([["حلو عني 😒"]], resize_keyboard=True)
-
-    await update.message.reply_text(
-        "شكراً على التقييم! هل ترغب في إضافة تعليق؟ (اكتب تعليقك أو اضغط على 'تخطي التعليق')",
-        reply_markup=reply_markup
-    )
-    return ASK_RATING_COMMENT
-
 
 async def handle_rating_comment(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     text = update.message.text
 
-    # التعامل مع خيار "حلو عني 😎"
-    if text == "حلو عني 😒":
-        comment = None  # تقييم بدون تعليق
-    else:
-        comment = text  # تعليق فعلي
-
+    comment = None if text == "حلو عني 😒" else text
     rating = context.user_data.get('temp_rating') or 0
 
-    # محاولة استخراج بيانات الطلب
     order_data = context.user_data.get("order_data", {})
     restaurant_id = order_data.get("restaurant_id")
     order_id = order_data.get("order_id")
@@ -4691,11 +4701,7 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
         comment=comment
     )
 
-    reply_markup = ReplyKeyboardMarkup([
-        ["اطلب عالسريع 🔥"],
-        ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-        ["من نحن 🏢", "أسئلة متكررة ❓"]
-    ], resize_keyboard=True)
+    reply_markup = main_menu_keyboard
 
     if success:
         if comment is None:
@@ -4712,10 +4718,34 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
 
 
 
+
 async def send_rating_to_restaurant(bot, user_id, order_id, order_number, restaurant_id, rating, comment=None):
     try:
         async with get_db_connection() as conn:
             async with conn.cursor() as cursor:
+                # تحقق من وجود تقييم سابق للمستخدم لهذا المطعم
+                await cursor.execute(
+                    "SELECT id FROM restaurant_ratings WHERE restaurant_id = %s AND user_id = %s",
+                    (restaurant_id, user_id)
+                )
+                existing_rating = await cursor.fetchone()
+                
+                if existing_rating:
+                    # تحديث التقييم الموجود
+                    await cursor.execute(
+                        "UPDATE restaurant_ratings SET rating = %s, comment = %s, created_at = NOW() WHERE restaurant_id = %s AND user_id = %s",
+                        (rating, comment, restaurant_id, user_id)
+                    )
+                else:
+                    # إضافة تقييم جديد
+                    await cursor.execute(
+                        "INSERT INTO restaurant_ratings (restaurant_id, user_id, rating, comment) VALUES (%s, %s, %s, %s)",
+                        (restaurant_id, user_id, rating, comment)
+                    )
+                
+                await conn.commit()
+                
+                # جلب قناة المطعم لإرسال التقييم
                 await cursor.execute("SELECT channel FROM restaurants WHERE id = %s", (restaurant_id,))
                 result = await cursor.fetchone()
 
@@ -5330,7 +5360,7 @@ conv_handler = ConversationHandler(
         ],
         ASK_RATING: [
             MessageHandler(filters.Regex(r"⭐.*"), handle_rating),
-            MessageHandler(filters.Regex("تخطي ⏭️"), handle_rating)
+            MessageHandler(filters.Regex("حلو عني 😒"), handle_rating)
         ],
         ASK_RATING_COMMENT: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_rating_comment)
