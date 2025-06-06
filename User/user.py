@@ -4555,7 +4555,7 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
     reply_markup = ReplyKeyboardMarkup([
         ["⭐", "⭐⭐", "⭐⭐⭐"],
         ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-        ["تخطي ⏭️"]
+        ["حلو عني 😒"]
     ], resize_keyboard=True)
 
     await update.message.reply_text(
@@ -4570,9 +4570,9 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
 async def handle_rating(update: Update, context: CallbackContext) -> int:
     rating_text = update.message.text
 
-    if rating_text == "تخطي ⏭️":
+    if rating_text == "حلو عني 😒":
         # لا شيء يُرسل، فقط العودة إلى القائمة الرئيسية
-        await update.message.reply_text("تمام! 🙌 رجعناك للقائمة الرئيسية.", reply_markup=main_menu_keyboard)
+        await update.message.reply_text("ماشي 😔", reply_markup=main_menu_keyboard)
         return MAIN_MENU
 
     rating_map = {"⭐": 1, "⭐⭐": 2, "⭐⭐⭐": 3, "⭐⭐⭐⭐": 4, "⭐⭐⭐⭐⭐": 5}
@@ -4598,8 +4598,15 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    if text == "تخطي ⏭️":
-        return await show_main_menu(update, context)
+    if text == "حلو عني 😒":
+        reply_markup = ReplyKeyboardMarkup([
+            ["اطلب عالسريع 🔥"],
+            ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+            ["من نحن 🏢", "أسئلة متكررة ❓"]
+        ], resize_keyboard=True)
+        await update.message.reply_text("ماشي 😒 رجعناك للقائمة الرئيسية.", reply_markup=reply_markup)
+        return MAIN_MENU
+
 
     order_info = await get_last_order(user_id)
     if not order_info:
@@ -4613,7 +4620,7 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard  = [
     ["⭐", "⭐⭐", "⭐⭐⭐"],
     ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-    ["تخطي ⏭️"]
+    ["حلو عني 😒"]
 ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -4629,13 +4636,11 @@ async def receive_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    if text == "🔙 رجوع":
-        return await show_main_menu(update, context)
-
+    
     rating = len(text)
     await update_conversation_state(user_id, "rating_stars", rating)
 
-    reply_markup = ReplyKeyboardMarkup([["تخطي التعليق"], ["🔙 رجوع"]], resize_keyboard=True)
+    reply_markup = ReplyKeyboardMarkup([["حلو عني 😒"]], resize_keyboard=True)
 
     await update.message.reply_text(
         "شكراً على التقييم! هل ترغب في إضافة تعليق؟ (اكتب تعليقك أو اضغط على 'تخطي التعليق')",
@@ -4649,7 +4654,7 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
     text = update.message.text
 
     # التعامل مع خيار "حلو عني 😎"
-    if text == "حلو عني 😎":
+    if text == "حلو عني 😒":
         comment = None  # تقييم بدون تعليق
     else:
         comment = text  # تعليق فعلي
