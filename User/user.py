@@ -4122,11 +4122,15 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
 
     elif choice == "لا خلص منرجع ومننتظر 🥲":
         reply_markup = ReplyKeyboardMarkup([
-            ["إلغاء ❌ بدي عدل"],
-            ["تأخرو عليي ما بعتولي انن بلشو 🫤"]
+            ["ذكرلي المطعم بطلبي 🙋"],
+            ["تأخرو كتير إلغاء عالسريع 😡"]
         ], resize_keyboard=True)
-        await update.message.reply_text("صبرك الله 😄", reply_markup=reply_markup)
-        return MAIN_MENU
+        await update.message.reply_text(
+            "ماشي منرجع ومننطر، تقدر تنكش المطعم بأي وقت 😉",
+            reply_markup=reply_markup
+        )
+        return CANCEL_ORDER_OPTIONS
+
 
     else:
         await update.message.reply_text("❌ يرجى اختيار أحد الخيارات المتاحة.")
@@ -4608,13 +4612,22 @@ async def handle_order_received(update: Update, context: CallbackContext) -> int
     return ASK_RATING
 
 
+
+
 async def handle_rating(update: Update, context: CallbackContext) -> int:
     text = update.message.text
 
+    # إذا اختار المستخدم تخطي التقييم
     if text == "حلو عني 😒":
-        await update.message.reply_text("ماشي 😔", reply_markup=main_menu_keyboard)
+        reply_markup = ReplyKeyboardMarkup([
+            ["اطلب عالسريع 🔥"],
+            ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+            ["من نحن 🏢", "أسئلة متكررة ❓"]
+        ], resize_keyboard=True)
+        await update.message.reply_text("ماشي 😔 رجعناك للقائمة الرئيسية.", reply_markup=reply_markup)
         return MAIN_MENU
 
+    # تحويل الرموز إلى رقم
     rating_map = {"⭐": 1, "⭐⭐": 2, "⭐⭐⭐": 3, "⭐⭐⭐⭐": 4, "⭐⭐⭐⭐⭐": 5}
     rating = rating_map.get(text, 0)
 
@@ -4622,9 +4635,7 @@ async def handle_rating(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("❌ يرجى اختيار تقييم صحيح من القائمة.")
         return ASK_RATING
 
-    context.user_data['temp_rating'] = rating
-
-    # ✅ حفظ البيانات مؤقتًا للمرحلة القادمة
+    # تخزين البيانات مؤقتًا
     order_data = context.user_data.get("order_data", {})
     context.user_data["pending_rating"] = {
         "order_id": order_data.get("order_id"),
@@ -4633,12 +4644,14 @@ async def handle_rating(update: Update, context: CallbackContext) -> int:
         "stars": rating
     }
 
+    # سؤال عن التعليق
     reply_markup = ReplyKeyboardMarkup([["حلو عني 😒"]], resize_keyboard=True)
     await update.message.reply_text(
         "شكراً على تقييمك! 🙏\nهل ترغب بترك تعليق لتحسين الخدمة؟ (أو اختر 'حلو عني 😒' لتخطي التعليق)",
         reply_markup=reply_markup
     )
     return ASK_RATING_COMMENT
+
 
 
 
@@ -4680,21 +4693,31 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK_RATING
 
 
-
 async def handle_rating_comment(update: Update, context: CallbackContext) -> int:
     user_id = update.effective_user.id
     text = update.message.text
-
     comment = None if text == "حلو عني 😒" else text
+
     pending = context.user_data.get("pending_rating")
-
     if not pending:
-        await update.message.reply_text("❌ لم نتمكن من متابعة التقييم. يرجى المحاولة لاحقاً.")
-        return MAIN_MENU
+        # محاولة جلب البيانات من قاعدة البيانات المؤقتة
+        try:
+            state = await get_conversation_state(user_id)
+            pending = {
+                "restaurant_id": state.get("rating_restaurant_id"),
+                "order_id": state.get("rating_order_id"),
+                "order_number": state.get("rating_order_number"),
+                "stars": state.get("rating_stars") or context.user_data.get("temp_rating")
+            }
+        except Exception as e:
+            logger.error(f"❌ فشل في جلب بيانات التقييم الاحتياطية: {e}")
+            await update.message.reply_text("❌ لم نتمكن من متابعة التقييم. يرجى المحاولة لاحقاً.")
+            return MAIN_MENU
 
+    # استخراج البيانات
+    restaurant_id = pending.get("restaurant_id")
     order_id = pending.get("order_id")
     order_number = pending.get("order_number")
-    restaurant_id = pending.get("restaurant_id")
     rating = pending.get("stars")
 
     if not all([restaurant_id, order_id, order_number, rating]):
@@ -4713,16 +4736,21 @@ async def handle_rating_comment(update: Update, context: CallbackContext) -> int
 
     context.user_data.pop("pending_rating", None)
 
+    reply_markup = ReplyKeyboardMarkup([
+        ["اطلب عالسريع 🔥"],
+        ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
+        ["من نحن 🏢", "أسئلة متكررة ❓"]
+    ], resize_keyboard=True)
+
     if success:
         if comment is None:
-            await update.message.reply_text("حلينا 😒 رجعناك للقائمة الرئيسية.", reply_markup=main_menu_keyboard)
+            await update.message.reply_text("حلينا 😒 رجعناك للقائمة الرئيسية.", reply_markup=reply_markup)
         else:
-            await update.message.reply_text("شكرا يا قلبي ❤️", reply_markup=main_menu_keyboard)
+            await update.message.reply_text("شكرا يا قلبي ❤️", reply_markup=reply_markup)
     else:
-        await update.message.reply_text("❌ فشل في إرسال التقييم. يرجى المحاولة لاحقاً.", reply_markup=main_menu_keyboard)
+        await update.message.reply_text("❌ فشل في إرسال التقييم. يرجى المحاولة لاحقاً.", reply_markup=reply_markup)
 
     return MAIN_MENU
-
 
 
 
