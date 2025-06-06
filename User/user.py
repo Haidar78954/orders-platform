@@ -4769,7 +4769,6 @@ async def send_rating_to_restaurant(bot, user_id, order_id, order_number, restau
 
 
 
-
 async def handle_report_based_cancellation(update: Update, context: CallbackContext):
     """📩 يلتقط إشعار إلغاء الطلب بسبب شكوى ويرسل إشعار للمستخدم"""
 
@@ -4778,7 +4777,7 @@ async def handle_report_based_cancellation(update: Update, context: CallbackCont
         logger.info(f"📥 استلمنا رسالة من القناة لمعالجتها كشكوى:\n{text}")
 
         # ✅ استخراج معرف الطلب والسبب من الرسالة (بدون backticks)
-        match = re.search(r"📌 معرف الطلب: (\w+)\s+📍 السبب: (.+)", text)
+        match = re.search(r"📌 معرف الطلب: ([\w-]+)\s+📍 السبب: (.+)", text)
         if not match:
             logger.warning(f"⚠️ لم يتم العثور على معرف الطلب أو السبب في الرسالة:\n{text}")
             return
@@ -4804,7 +4803,7 @@ async def handle_report_based_cancellation(update: Update, context: CallbackCont
             f"وإذا واجهت مشكلة، لا تتردد بالتواصل معنا عبر الدعم. 🙏"
         )
 
-        # ✅ إرسال الرسالة للمستخدم
+        # ✅ إرسال الرسالة للمستخدم مع إعادة للقائمة
         await context.bot.send_message(
             chat_id=user_id,
             text=message,
@@ -4812,10 +4811,18 @@ async def handle_report_based_cancellation(update: Update, context: CallbackCont
             reply_markup=get_main_menu()
         )
 
-        logger.info(f"✅ تم إعلام المستخدم {user_id} بإلغاء الطلب {order_id} بسبب شكوى.")
+        # ✅ تنظيف بيانات المستخدم المؤقتة
+        user_orders.pop(order_id, None)
+        if "conversation_states" in context.bot_data:
+            context.bot_data["conversation_states"].pop(user_id, None)
+        if "shopping_carts" in context.bot_data:
+            context.bot_data["shopping_carts"].pop(user_id, None)
+
+        logger.info(f"✅ تم إعلام المستخدم {user_id} بإلغاء الطلب {order_id} وإعادته للقائمة الرئيسية.")
 
     except Exception as e:
         logger.error(f"❌ حدث خطأ أثناء معالجة الشكوى أو إرسالها للمستخدم: {e}")
+
 
 
 
