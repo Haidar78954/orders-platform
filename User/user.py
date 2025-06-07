@@ -4089,10 +4089,10 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
     user_id = update.effective_user.id
 
        # 🛡️ التحقق من الإدخال غير المتوقع
-    valid_choices = ["تأخرو كتير إلغاء عالسريع 😡", "لا خلص منرجع ومننتظر 🥲", "اي متاكد 🥱"]
+    valid_choices = ["اي متاكد 🥱", "لا خلص منرجع ومننتظر 🥲"]
     if choice not in valid_choices:
         reply_markup = ReplyKeyboardMarkup([
-            ["تأخرو كتير إلغاء عالسريع 😡"],
+            ["اي متاكد 🥱"],
             ["لا خلص منرجع ومننتظر 🥲"]
         ], resize_keyboard=True)
         await update.message.reply_text(
@@ -4101,32 +4101,8 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
         )
         return CANCEL_ORDER_OPTIONS
 
-    if choice == "تأخرو كتير إلغاء عالسريع 😡":
-        # التحقق من وجود بيانات الطلب قبل عرض خيارات التأكيد
-        order_data = context.user_data.get("order_data")
-        if not order_data:
-            await update.message.reply_text("❌ لم يتم تحديد طلب لإلغائه. يرجى التأكد من أنك قمت بتأكيد الطلب مسبقاً.")
-            # العودة إلى القائمة الرئيسية
-            reply_markup = ReplyKeyboardMarkup([
-                ["اطلب عالسريع 🔥"],
-                ["لا بدي عدل 😐", "التواصل مع الدعم 🎧"],
-                ["من نحن 🏢", "أسئلة متكررة ❓"]
-            ], resize_keyboard=True)
-            await update.message.reply_text("تم العودة إلى القائمة الرئيسية", reply_markup=reply_markup)
-            return MAIN_MENU
-            
-        # إذا وجدت بيانات الطلب، نعرض خيارات التأكيد
-        reply_markup = ReplyKeyboardMarkup([
-            ["اي متاكد 🥱"],
-            ["لا خلص منرجع ومننتظر 🥲"]
-        ], resize_keyboard=True)
-        await update.message.reply_text(
-            "هل أنت متأكد أنك تريد إلغاء الطلب؟ اختر أحد الخيارات:",
-            reply_markup=reply_markup
-        )
-        return CANCEL_ORDER_OPTIONS
 
-    elif choice == "اي متاكد 🥱":
+    if choice == "اي متاكد 🥱":
         order_data = context.user_data.get("order_data")
         if not order_data:
             await update.message.reply_text("❌ لم يتم تحديد طلب لإلغائه.")
@@ -5479,6 +5455,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("إلغاء متأكد ❌"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("^اي اي متاكد 🥱$"), handle_confirm_cancellation),
             MessageHandler(filters.Regex("^اي متاكد 🥱$"), handle_final_cancellation),
+            MessageHandler(filters.Regex("^لا خلص منرجع ومننتظر 🥲$"), handle_final_cancellation),
             MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("معلش رجعني 🙃"), handle_confirm_cancellation),
