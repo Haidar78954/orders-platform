@@ -3972,7 +3972,8 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
 
     if context.user_data.get("reminder_sent", False):
         await update.message.reply_text("فيك تذكر مرة بس 😔")
-        return MAIN_MENU
+        return CANCEL_ORDER_OPTIONS
+
 
     context.user_data["reminder_sent"] = True
 
@@ -4018,7 +4019,8 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
         logger.error(f"❌ خطأ أثناء تنفيذ الطلب: {e}")
         await update.message.reply_text("❌ حدث خطأ أثناء تنفيذ الطلب. حاول مرة أخرى لاحقاً.")
 
-    return MAIN_MENU
+    return CANCEL_ORDER_OPTIONS
+
 
 
 
@@ -4044,7 +4046,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
             
         # إذا وجدت بيانات الطلب، نعرض خيارات التأكيد
         reply_markup = ReplyKeyboardMarkup([
-            ["اي اي متاكد 🥱"],
+            ["اي متاكد 🥱"],
             ["لا خلص منرجع ومننتظر 🥲"]
         ], resize_keyboard=True)
         await update.message.reply_text(
@@ -4053,7 +4055,7 @@ async def handle_final_cancellation(update: Update, context: CallbackContext) ->
         )
         return CANCEL_ORDER_OPTIONS
 
-    elif choice == "اي اي متاكد 🥱":
+    elif choice == "اي متاكد 🥱":
         order_data = context.user_data.get("order_data")
         if not order_data:
             await update.message.reply_text("❌ لم يتم تحديد طلب لإلغائه.")
@@ -4669,21 +4671,29 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ماشي 😒 رجعناك للقائمة الرئيسية.", reply_markup=reply_markup)
         return MAIN_MENU
 
-
     order_info = await get_last_order(user_id)
     if not order_info:
         await update.message.reply_text("ليس لديك طلبات سابقة للتقييم.")
         return MAIN_MENU
 
+    # ✅ تخزين البيانات في conversation_state للاحتياط
     await update_conversation_state(user_id, "rating_order_id", order_info["order_id"])
     await update_conversation_state(user_id, "rating_order_number", order_info["order_number"])
     await update_conversation_state(user_id, "rating_restaurant_id", order_info["restaurant_id"])
 
-    keyboard  = [
-    ["⭐", "⭐⭐", "⭐⭐⭐"],
-    ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-    ["حلو عني 😒"]
-]
+    # ✅ تخزين البيانات محليًا داخل السياق لتستخدم لاحقًا في pending_rating
+    context.user_data["order_data"] = {
+        "order_id": order_info["order_id"],
+        "order_number": order_info["order_number"],
+        "restaurant_id": order_info["restaurant_id"],
+        "restaurant_name": order_info["restaurant_name"]
+    }
+
+    keyboard = [
+        ["⭐", "⭐⭐", "⭐⭐⭐"],
+        ["⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
+        ["حلو عني 😒"]
+    ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(
@@ -4691,6 +4701,7 @@ async def request_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
     return ASK_RATING
+
 
 
 async def handle_rating_comment(update: Update, context: CallbackContext) -> int:
@@ -5395,7 +5406,8 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.Regex("منرجع ومننطر 🙃"), handle_return_and_wait),
             MessageHandler(filters.Regex("العودة والانتظار 🙃"), handle_back_and_wait),
             MessageHandler(filters.Regex("إلغاء متأكد ❌"), handle_confirm_cancellation),
-            MessageHandler(filters.Regex("اي اي متاكد 🥱"), handle_confirm_cancellation),
+            MessageHandler(filters.Regex("^اي اي متاكد 🥱$"), handle_confirm_cancellation),
+            MessageHandler(filters.Regex("^اي متاكد 🥱$"), handle_final_cancellation),
             MessageHandler(filters.Regex("إلغاء ❌ بدي عدل"), handle_order_cancellation),
             MessageHandler(filters.Regex("تأخرو عليي ما بعتولي انن بلشو 🫤"), handle_no_confirmation),
             MessageHandler(filters.Regex("معلش رجعني 🙃"), handle_confirm_cancellation),
