@@ -3736,10 +3736,7 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 "رح نبعتلك مين بدو يوصلك ياه لعندك 🚴‍♂️ بس يجهز 🔥\n\n"
                 f"📌 *معرف الطلب:* `{order_id}`"
             )
-            await context.bot.send_sticker(
-                chat_id=user_id,
-                sticker="CAACAgIAAxkBAAEBxwtoM2b-lusvTTS2gHaC6p567Ri8QAAC6TkAAquXoElIPA20liWcHzYE"
-            )
+            
             reply_markup = ReplyKeyboardMarkup([
                 ["وصل طلبي شكرا لكم 🙏"],
                 ["إلغاء الطلب بسبب مشكلة 🫢"]
@@ -3750,6 +3747,12 @@ async def handle_cashier_interaction(update: Update, context: CallbackContext) -
                 text=message_text,
                 parse_mode="Markdown",
                 reply_markup=reply_markup
+            )
+            await asyncio.sleep(0.2)  # ⏱️ تأخير بسيط لتحسين ترتيب العرض
+
+            await context.bot.send_sticker(
+                chat_id=user_id,
+                sticker="CAACAgIAAxkBAAEBxwtoM2b-lusvTTS2gHaC6p567Ri8QAAC6TkAAquXoElIPA20liWcHzYE"
             )
 
         # ✅ حالة: الطلب جاهز للتوصيل
