@@ -3207,7 +3207,7 @@ async def ask_order_location(update: Update, context: CallbackContext) -> int:
             summary_text += f"\n📝 لا يوجد ملاحظات."
 
         reply_markup = ReplyKeyboardMarkup([
-            ["يالله عالسريع 🔥"],
+            ["يلا عالسريع 🔥"],
             ["لا ماني متأكد 😐"]
         ], resize_keyboard=True)
 
@@ -3376,7 +3376,7 @@ async def show_order_summary(update: Update, context: CallbackContext, is_new_lo
         location_text = "📍 الموقع الأساسي المسجل سابقاً"
 
     reply_markup = ReplyKeyboardMarkup([
-        ["يالله عالسريع 🔥"],
+        ["يلا عالسريع 🔥"],
         ["لا ماني متأكد 😐"]
     ], resize_keyboard=True)
 
@@ -3407,10 +3407,10 @@ async def process_confirm_final_order(update, context):
     user_id = update.effective_user.id
 
       # 🛡️ التحقق من الإدخال غير المتوقع
-    valid_choices = ["يالله عالسريع 🔥", "لا ماني متأكد 😐"]
+    valid_choices = ["يلا عالسريع 🔥", "لا ماني متأكد 😐"]
     if choice not in valid_choices:
         reply_markup = ReplyKeyboardMarkup([
-            ["يالله عالسريع 🔥"],
+            ["يلا عالسريع 🔥"],
             ["لا ماني متأكد 😐"]
         ], resize_keyboard=True)
         await update.message.reply_text(
@@ -3434,7 +3434,7 @@ async def process_confirm_final_order(update, context):
     # تفعيل القفل المؤقت
     context.user_data["is_order_processing"] = True
 
-    if choice == "يالله عالسريع 🔥":
+    if choice == "يلا عالسريع 🔥":
         user_state = await get_conversation_state(user_id)
         cart = await get_cart_from_db(user_id) or []
 
@@ -5465,7 +5465,7 @@ conv_handler = ConversationHandler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cancellation_reason)
         ],
         CONFIRM_FINAL_ORDER: [
-            MessageHandler(filters.Regex("يالله عالسريع 🔥|لا ماني متأكد 😐"), handle_confirm_final_order)
+            MessageHandler(filters.Regex("يلا عالسريع 🔥|لا ماني متأكد 😐"), handle_confirm_final_order)
         ],
         ASK_REPORT_REASON: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_report_cancellation)
