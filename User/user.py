@@ -33,7 +33,8 @@ from telegram.ext import (
 )
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import CallbackContext
 
 
 
@@ -104,6 +105,16 @@ async def send_message_with_retry(bot, chat_id, text, order_id=None, max_retries
     
     # رفع استثناء بعد فشل جميع المحاولات
     raise Exception(f"فشلت جميع المحاولات ({max_retries}) لإرسال الرسالة.")
+
+
+
+async def show_invalid_choice(update: Update, options: list[str], prompt: str, state: int) -> int:
+    """يعيد المستخدم لنفس الحالة في حال كتب شيئًا خارج الخيارات المتاحة."""
+    reply_markup = ReplyKeyboardMarkup([[o] for o in options], resize_keyboard=True)
+    await update.message.reply_text("حبيبي اختار من الخيارات يلي تحت 👇", reply_markup=reply_markup)
+    await update.message.reply_text(prompt, reply_markup=reply_markup)
+    return state
+
 
 
 
@@ -1571,6 +1582,19 @@ async def confirm_info(update: Update, context: CallbackContext) -> int:
 async def handle_confirmation(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
 
+     # 🛡️ التحقق من الإدخال غير المتوقع
+    valid_choices = ["اي ولو 😏", "لا بدي عدل 😐"]
+    if choice not in valid_choices:
+        reply_markup = ReplyKeyboardMarkup([
+            ["اي ولو 😏"],
+            ["لا بدي عدل 😐"]
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            "حبيبي اختار من الخيارات يلي تحت 👇",
+            reply_markup=reply_markup
+        )
+        return CONFIRM_INFO
+
     if choice == "اي ولو 😏":
         try:
             user_id = update.effective_user.id
@@ -2132,6 +2156,27 @@ async def handle_restaurant_selection(update: Update, context: CallbackContext) 
     selected_option = update.message.text
     restaurant_map = context.user_data.get('restaurant_map', {})
     user_id = update.effective_user.id
+
+    # 🛡️ التحقق من الخيارات الخاصة
+    if selected_option == "مطعمي المفضل وينو ؟ 😕":
+        # معالجة هذا الخيار...
+        return ASK_NEW_RESTAURANT_NAME
+    
+    if selected_option == "القائمة الرئيسية 🪧":
+        return await main_menu(update, context)
+    
+    # 🛡️ التحقق من الإدخال غير المتوقع
+    valid_choices = list(restaurant_map.keys()) + ["مطعمي المفضل وينو ؟ 😕", "القائمة الرئيسية 🪧"]
+    if selected_option not in valid_choices:
+        keyboard_buttons = [KeyboardButton(name) for name in valid_choices]
+        keyboard_layout = chunk_buttons(keyboard_buttons, cols=2)
+        reply_markup = ReplyKeyboardMarkup(keyboard_layout, resize_keyboard=True)
+        
+        await update.message.reply_text(
+            "حبيبي اختار من الخيارات يلي تحت 👇",
+            reply_markup=reply_markup
+        )
+        return SELECT_RESTAURANT
 
     if selected_option == "مطعمي المفضل وينو ؟ 😕":
         reply_markup = ReplyKeyboardMarkup([["عودة ➡️"]], resize_keyboard=True)
@@ -3361,6 +3406,19 @@ async def process_confirm_final_order(update, context):
     choice = update.message.text
     user_id = update.effective_user.id
 
+      # 🛡️ التحقق من الإدخال غير المتوقع
+    valid_choices = ["يالله عالسريع 🔥", "لا ماني متأكد 😐"]
+    if choice not in valid_choices:
+        reply_markup = ReplyKeyboardMarkup([
+            ["يالله عالسريع 🔥"],
+            ["لا ماني متأكد 😐"]
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            "حبيبي اختار من الخيارات يلي تحت 👇",
+            reply_markup=reply_markup
+        )
+        return CONFIRM_FINAL_ORDER
+
     # 🛡️ حماية ضد الضغط المكرر أثناء التنفيذ
     if context.user_data.get("is_order_processing"):
         await update.message.reply_text("⏳ يتم تنفيذ طلبك حالياً، انتظر لحظة...")
@@ -4029,6 +4087,19 @@ async def handle_reminder(update: Update, context: CallbackContext) -> int:
 async def handle_final_cancellation(update: Update, context: CallbackContext) -> int:
     choice = update.message.text
     user_id = update.effective_user.id
+
+       # 🛡️ التحقق من الإدخال غير المتوقع
+    valid_choices = ["تأخرو كتير إلغاء عالسريع 😡", "لا خلص منرجع ومننتظر 🥲", "اي متاكد 🥱"]
+    if choice not in valid_choices:
+        reply_markup = ReplyKeyboardMarkup([
+            ["تأخرو كتير إلغاء عالسريع 😡"],
+            ["لا خلص منرجع ومننتظر 🥲"]
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            "حبيبي اختار من الخيارات يلي تحت 👇",
+            reply_markup=reply_markup
+        )
+        return CANCEL_ORDER_OPTIONS
 
     if choice == "تأخرو كتير إلغاء عالسريع 😡":
         # التحقق من وجود بيانات الطلب قبل عرض خيارات التأكيد
